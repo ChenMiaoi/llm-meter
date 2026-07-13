@@ -96,6 +96,7 @@ impl ProviderAdapter for AdminAdapter {
             external_id: "openai-organization".into(),
             display_name: Some("OpenAI Platform".into()),
             credential_ref: Some(reference),
+            settings: None,
         })
     }
     async fn probe_capabilities(

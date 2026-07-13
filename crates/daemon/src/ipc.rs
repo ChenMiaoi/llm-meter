@@ -148,6 +148,45 @@ async fn dispatch(
         )
         .map(|v| json!(v))
         .map_err(|_| (-32603, "snapshot error")),
+        "connections/settings/get" => param_id(&r.params)
+            .and_then(|id| {
+                repo.connection_settings(id)
+                    .map_err(|_| (-32603, "repository error"))
+            })
+            .map(|value| json!(value)),
+        "connections/settings/update" => param_id(&r.params).and_then(|id| {
+            let settings = r
+                .params
+                .get("settings")
+                .cloned()
+                .ok_or((-32602, "settings required"))
+                .and_then(|value| {
+                    serde_json::from_value::<llm_meter_core::ConnectionSettings>(value)
+                        .map_err(|_| (-32602, "invalid settings"))
+                })?;
+            repo.update_connection_settings(id, &settings)
+                .map_err(|_| (-32603, "repository error"))?;
+            Ok(json!(settings))
+        }),
+        "usage/events" => param_id(&r.params)
+            .and_then(|id| {
+                repo.usage_events(
+                    id,
+                    r.params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize,
+                )
+                .map_err(|_| (-32603, "repository error"))
+            })
+            .map(|value| json!(value)),
+        "usage/summary" => param_id(&r.params)
+            .and_then(|id| {
+                repo.metrics(
+                    id,
+                    None,
+                    r.params.get("limit").and_then(Value::as_u64).unwrap_or(500) as usize,
+                )
+                .map_err(|_| (-32603, "repository error"))
+            })
+            .map(|value| json!(value)),
         "metrics/query" => param_id(&r.params)
             .and_then(|v| {
                 repo.metrics(
@@ -201,6 +240,70 @@ async fn dispatch(
                 let _ = crate::alerts::evaluate(repo, budget.connection_id);
                 Ok(json!(budget))
             }),
+        "proxy/status" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => runtime
+                .proxy_running(id)
+                .and_then(|running| runtime.proxy_listen(id).map(|listen| json!({"running":running,"listen":listen})))
+                .map_err(|error| (-32010, error.code())),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
+        "proxy/start" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => runtime
+                .start_proxy(id)
+                .await
+                .map(|_| json!({"started":true}))
+                .map_err(|error| (-32010, error.code())),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
+        "proxy/stop" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => runtime
+                .stop_proxy(id)
+                .map(|stopped| json!({"stopped":stopped}))
+                .map_err(|error| (-32010, error.code())),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
+        "proxy/credentials/list" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => runtime
+                .proxy_credentials(id)
+                .map(|credentials| json!(credentials))
+                .map_err(|error| (-32010, error.code())),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
+        "proxy/credentials/create" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => runtime
+                .create_proxy_credential(
+                    id,
+                    r.params
+                        .get("display_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Client"),
+                    r.params.get("token").and_then(Value::as_str),
+                )
+                .map(|(credential, token)| json!({"credential":credential,"token":token}))
+                .map_err(|error| (-32010, error.code())),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
+        "proxy/credentials/disable" => match (runtime.as_ref(), param_id(&r.params)) {
+            (Some(runtime), Ok(id)) => r
+                .params
+                .get("credential_id")
+                .and_then(Value::as_str)
+                .and_then(|value| uuid::Uuid::parse_str(value).ok())
+                .ok_or((-32602, "invalid credential_id"))
+                .and_then(|credential_id| {
+                    runtime
+                        .disable_proxy_credential(id, credential_id)
+                        .map(|disabled| json!({"disabled":disabled}))
+                        .map_err(|error| (-32010, error.code()))
+                }),
+            (None, _) => Err((-32001, "provider runtime unavailable")),
+            (_, Err(error)) => Err(error),
+        },
         "alerts/list" => {
             let connection = r
                 .params
@@ -268,6 +371,24 @@ async fn dispatch(
             (None, _) => Err((-32001, "provider runtime unavailable")),
             (_, Err(e)) => Err(e),
         },
+        "connections/validate-compatible" => match runtime.as_ref() {
+            Some(runtime) => {
+                let origin = r.params.get("origin").and_then(Value::as_str);
+                let secret = r.params.get("secret").and_then(Value::as_str);
+                match (origin, secret) {
+                    (Some(origin), Some(secret)) => runtime
+                        .validate_openai_compatible(
+                            origin,
+                            secrecy::SecretString::from(secret.to_owned()),
+                        )
+                        .await
+                        .map(|report| json!(report))
+                        .map_err(|error| (-32010, error.code())),
+                    _ => Err((-32602, "origin and secret required")),
+                }
+            }
+            None => Err((-32001, "provider runtime unavailable")),
+        },
         "connections/add" => match runtime.as_deref() {
             Some(runtime) => {
                 let provider = r.params.get("provider_id").and_then(Value::as_str);
@@ -299,7 +420,14 @@ async fn dispatch(
                             // second user action. The sync stays asynchronous so the auth response
                             // can update the UI immediately.
                             let _ = runtime.request_sync(connection.id, false);
-                            Ok(json!(public_connection(connection)))
+                            if connection.connection_type == "openai_compatible_proxy" {
+                                match runtime.start_proxy(connection.id).await {
+                                    Ok(()) => Ok(json!(public_connection(connection))),
+                                    Err(error) => Err((-32010, error.code())),
+                                }
+                            } else {
+                                Ok(json!(public_connection(connection)))
+                            }
                         }
                         Err(error) => Err((-32010, error.code())),
                     },
@@ -430,7 +558,7 @@ mod tests {
             last_error_code: None,
             disabled_at: None,
         };
-        repo.add_authenticated_connection(&connection, Some(&credential))
+        repo.add_authenticated_connection(&connection, Some(&credential), None)
             .unwrap();
         let server = Server::new(repo);
         let path = socket.clone();

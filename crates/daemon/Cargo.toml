@@ -11,11 +11,15 @@ categories.workspace = true
 description = "Local-first provider scheduler, Codex collector, and IPC runtime for LLM Meter"
 [dependencies]
 chrono.workspace = true
-llm-meter-core = { version = "0.1.0", path = "../core" }
-llm-meter-provider-kimi = { version = "0.1.0", path = "../provider-kimi" }
-llm-meter-provider-openai = { version = "0.1.0", path = "../provider-openai" }
-llm-meter-secret-store = { version = "0.1.0", path = "../secret-store" }
-llm-meter-storage = { version = "0.1.0", path = "../storage" }
+hex.workspace = true
+sha2.workspace = true
+llm-meter-core = { version = "0.2.0", path = "../core" }
+llm-meter-provider-kimi = { version = "0.2.0", path = "../provider-kimi" }
+llm-meter-provider-openai = { version = "0.2.0", path = "../provider-openai" }
+llm-meter-provider-relay = { version = "0.2.0", path = "../provider-relay" }
+llm-meter-relay-proxy = { version = "0.2.0", path = "../relay-proxy" }
+llm-meter-secret-store = { version = "0.2.0", path = "../secret-store" }
+llm-meter-storage = { version = "0.2.0", path = "../storage" }
 notify-rust.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,9 +29,10 @@ thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
+url.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
-llm-meter-provider-testkit = { version = "0.1.0", path = "../provider-testkit" }
+llm-meter-provider-testkit = { version = "0.2.0", path = "../provider-testkit" }

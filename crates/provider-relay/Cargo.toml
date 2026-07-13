@@ -1,21 +1,23 @@
 [package]
-name = "llm-meter-provider-testkit"
+name = "llm-meter-provider-relay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-keywords.workspace = true
-categories.workspace = true
-description = "Mock providers and adapter test helpers for LLM Meter"
+description = "Third-party OpenAI-compatible relay adapters for LLM Meter"
+
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+hex.workspace = true
 llm-meter-core = { version = "0.2.0", path = "../core" }
-llm-meter-secret-store = { version = "0.2.0", path = "../secret-store" }
+reqwest.workspace = true
+rust_decimal.workspace = true
 secrecy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
+sha2.workspace = true
+url.workspace = true
 uuid.workspace = true

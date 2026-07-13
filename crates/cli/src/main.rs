@@ -77,6 +77,15 @@ enum Command {
         /// Read the secret credential from one line on standard input.
         #[arg(long)]
         secret_stdin: bool,
+        /// Relay profile (required for `add relay`).
+        #[arg(long, value_enum)]
+        profile: Option<RelayProfile>,
+        /// Relay origin URL.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Local loopback address used by the relay proxy.
+        #[arg(long, default_value = "127.0.0.1:18456")]
+        listen: String,
     },
     Budget {
         connection_id: String,
@@ -87,6 +96,10 @@ enum Command {
     Waybar {
         #[arg(long)]
         watch: bool,
+    },
+    Proxy {
+        #[command(subcommand)]
+        action: ProxyAction,
     },
     Ui {
         #[arg(long,conflicts_with_all=["hide","main"])]
@@ -102,6 +115,7 @@ enum Provider {
     #[default]
     Openai,
     Kimi,
+    Relay,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -109,6 +123,41 @@ enum AddKind {
     Subscription,
     Admin,
     Standard,
+    Relay,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum RelayProfile {
+    NewApi,
+    Openrouter,
+    Generic,
+}
+
+#[derive(Subcommand)]
+enum ProxyAction {
+    Status {
+        connection_id: String,
+    },
+    Start {
+        connection_id: String,
+    },
+    Stop {
+        connection_id: String,
+    },
+    Credentials {
+        connection_id: String,
+    },
+    CreateCredential {
+        connection_id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        token: Option<String>,
+    },
+    DisableCredential {
+        connection_id: String,
+        credential_id: String,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -250,10 +299,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             provider,
             name,
             secret_stdin,
+            profile,
+            base_url,
+            listen,
         } => match kind {
             AddKind::Subscription => {
                 let (provider_id, connection_type, auth) = match provider {
                     Provider::Kimi => ("kimi", "kimi_code_subscription", "oauth_device_code"),
+                    Provider::Relay => return Err("use `llm-meter add relay --profile ...`".into()),
                     Provider::Openai => {
                         if device {
                             ("openai", "chatgpt_subscription", "oauth_device_code")
@@ -331,6 +384,82 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 drop(secret);
                 print(result?);
             }
+            AddKind::Relay => {
+                let profile = profile.ok_or("--profile is required for relay")?;
+                let (connection_type, profile_name, default_origin) = match profile {
+                    RelayProfile::NewApi => ("new_api", "new_api", None),
+                    RelayProfile::Openrouter => {
+                        ("openrouter", "openrouter", Some("https://openrouter.ai"))
+                    }
+                    RelayProfile::Generic => ("openai_compatible_proxy", "generic", None),
+                };
+                let origin = base_url
+                    .as_deref()
+                    .or(default_origin)
+                    .ok_or("--base-url is required for this relay profile")?;
+                let challenge = call(&p, "connections/add", json!({
+                    "provider_id":"relay", "connection_type":connection_type, "display_name":name,
+                    "auth_scheme":"api_key", "settings":{"schema_version":1,"values":{
+                        "profile":profile_name,"origin":origin,"collection_mode":if matches!(profile, RelayProfile::Generic){"proxy"}else{"pull"},
+                        "listen":listen
+                    }}
+                })).await?;
+                let challenge_id = challenge
+                    .get("challenge_id")
+                    .and_then(Value::as_str)
+                    .ok_or("daemon did not return challenge id")?;
+                let secret = read_secret(secret_stdin, "Relay API Key: ")?;
+                let result = call(
+                    &p,
+                    "connections/auth/complete",
+                    json!({"challenge_id":challenge_id,"secret":secret}),
+                )
+                .await;
+                drop(secret);
+                print(result?);
+            }
+        },
+        Command::Proxy { action } => match action {
+            ProxyAction::Status { connection_id } => {
+                print(call(&p, "proxy/status", json!({"connection_id":connection_id})).await?)
+            }
+            ProxyAction::Start { connection_id } => {
+                print(call(&p, "proxy/start", json!({"connection_id":connection_id})).await?)
+            }
+            ProxyAction::Stop { connection_id } => {
+                print(call(&p, "proxy/stop", json!({"connection_id":connection_id})).await?)
+            }
+            ProxyAction::Credentials { connection_id } => print(
+                call(
+                    &p,
+                    "proxy/credentials/list",
+                    json!({"connection_id":connection_id}),
+                )
+                .await?,
+            ),
+            ProxyAction::CreateCredential {
+                connection_id,
+                name,
+                token,
+            } => print(
+                call(
+                    &p,
+                    "proxy/credentials/create",
+                    json!({"connection_id":connection_id,"display_name":name,"token":token}),
+                )
+                .await?,
+            ),
+            ProxyAction::DisableCredential {
+                connection_id,
+                credential_id,
+            } => print(
+                call(
+                    &p,
+                    "proxy/credentials/disable",
+                    json!({"connection_id":connection_id,"credential_id":credential_id}),
+                )
+                .await?,
+            ),
         },
         Command::Budget {
             connection_id,

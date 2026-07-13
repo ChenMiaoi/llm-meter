@@ -1,22 +1,24 @@
 [package]
-name = "llm-meter-provider-openai"
+name = "llm-meter-relay-proxy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-keywords.workspace = true
-categories.workspace = true
-description = "OpenAI Platform and ChatGPT subscription adapters for LLM Meter"
+description = "Privacy-preserving OpenAI-compatible local proxy for LLM Meter"
+
 [dependencies]
-async-trait.workspace = true
+axum.workspace = true
+bytes.workspace = true
 chrono.workspace = true
+http.workspace = true
+futures.workspace = true
 llm-meter-core = { version = "0.2.0", path = "../core" }
-reqwest.workspace = true
+llm-meter-storage = { version = "0.2.0", path = "../storage" }
+reqwest = { workspace = true, features = ["stream"] }
 rust_decimal.workspace = true
 secrecy.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 url.workspace = true

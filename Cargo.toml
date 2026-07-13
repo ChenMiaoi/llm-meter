@@ -7,13 +7,15 @@ members = [
   "crates/provider-openai",
   "crates/provider-kimi",
   "crates/provider-testkit",
+  "crates/provider-relay",
+  "crates/relay-proxy",
   "crates/daemon",
   "crates/cli",
 ]
 exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/llm-meter/llm-meter"
@@ -23,6 +25,9 @@ keywords = ["llm", "openai", "usage", "wayland", "monitoring"]
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
+axum = "0.8"
+bytes = "1"
+http = "1"
 async-trait = "0.1"
 bitflags = { version = "2", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }

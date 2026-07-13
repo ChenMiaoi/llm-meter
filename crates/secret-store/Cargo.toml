@@ -14,7 +14,7 @@ description = "Native Keyring-backed credential storage for LLM Meter"
 async-trait.workspace = true
 chrono.workspace = true
 keyring.workspace = true
-llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-core = { version = "0.2.0", path = "../core" }
 secrecy.workspace = true
 tokio.workspace = true
 uuid.workspace = true

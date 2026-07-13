@@ -286,6 +286,8 @@ impl ProviderAdapter for SubscriptionAdapter {
             metric_samples: metrics,
             quota_windows: quotas,
             rate_limit_reset_credits: reset_credits,
+            usage_events: Vec::new(),
+            provider_events: Vec::new(),
             next_cursor: None,
             provider_timestamp: Some(observed),
         })
@@ -505,6 +507,7 @@ fn identity(a: AccountResponse) -> Result<ConnectionIdentity, ProviderError> {
         external_id: external,
         display_name: a.email,
         credential_ref: None,
+        settings: None,
     })
 }
 fn timestamp(v: i64) -> Option<DateTime<Utc>> {

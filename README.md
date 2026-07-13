@@ -14,6 +14,13 @@ ChatGPT subscriptions, and Kimi (Moonshot AI) Code subscriptions. LLM Meter
 can also discover locally running Codex sessions, split their token usage by
 model, and calculate an API-equivalent cost estimate.
 
+## Version 0.2.0
+
+- Adds relay-provider support for New API, OpenRouter, and generic OpenAI-compatible endpoints.
+- Adds a local authenticated relay proxy with per-client credentials and usage accounting.
+- Expands relay management across the CLI, desktop UI, and native Noctalia panel.
+- Fixes the Noctalia bar widget width negotiation so the seven-day Token trend is not clipped.
+
 ## Features
 
 - ChatGPT subscription quota, weekly reset time, and reset-credit expiry.
@@ -21,6 +28,8 @@ model, and calculate an API-equivalent cost estimate.
 - Embedded pricing catalog for OpenAI, Kimi, MiniMax, GLM, MiMo, Claude, DeepSeek, and Gemini.
 - Estimated quota exhaustion time based on recent local activity.
 - OpenAI Platform usage and cost collection through supported API credentials.
+- New API and OpenRouter usage collection, plus generic OpenAI-compatible relay support.
+- Authenticated local relay proxy with per-client credentials and usage accounting.
 - Automatic discovery of running Codex sessions every two seconds.
 - Per-model input, cached-input, output, and total-token accounting.
 - Local-day Token and API-equivalent cost totals that survive Codex exits and
@@ -108,7 +117,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 To install a specific stable version instead of the newest one:
 
 ```bash
-cargo install --locked --version 0.1.0 llm-meter-cli
+cargo install --locked --version 0.2.0 llm-meter-cli
 ```
 
 Upgrade an existing Cargo installation with:
@@ -370,9 +379,10 @@ The Tauri desktop package is intentionally excluded from crates.io publishing.
 Publishing must follow dependency order:
 
 1. `llm-meter-core`;
-2. `llm-meter-secret-store`, `llm-meter-storage`, and
-   `llm-meter-provider-openai`;
-3. `llm-meter-provider-testkit`;
+2. `llm-meter-secret-store`, `llm-meter-storage`,
+   `llm-meter-provider-openai`, `llm-meter-provider-kimi`, and
+   `llm-meter-relay-proxy`;
+3. `llm-meter-provider-relay` and `llm-meter-provider-testkit`;
 4. `llm-meter-daemon`;
 5. `llm-meter-cli`.
 
@@ -395,8 +405,8 @@ Pushing a semantic-version tag that matches every Cargo package version creates
 a GitHub Release automatically:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 The release workflow runs the workspace tests, builds the CLI, daemon, and

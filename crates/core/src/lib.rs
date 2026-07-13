@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const IPC_VERSION: u32 = 1;
-pub const SCHEMA_VERSION: u32 = 1;
+pub const IPC_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -140,6 +140,8 @@ impl MetricKey {
     pub const COST_ACTUAL: &'static str = "cost.actual";
     pub const COST_ESTIMATED: &'static str = "cost.estimated";
     pub const CREDIT_BALANCE: &'static str = "credit.balance";
+    pub const COST_UPSTREAM: &'static str = "cost.upstream";
+    pub const CREDIT_USED: &'static str = "credit.used";
     pub const BUDGET_CONFIGURED: &'static str = "budget.configured";
     pub const BUDGET_REMAINING: &'static str = "budget.remaining";
 
@@ -428,11 +430,33 @@ pub enum AuthScheme {
     Manual,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ConnectionSettings {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub values: BTreeMap<String, serde_json::Value>,
+}
+
+impl ConnectionSettings {
+    pub fn validate_public(&self) -> Result<(), DomainError> {
+        const SECRET_TERMS: &[&str] = &["api_key", "authorization", "password", "secret", "token"];
+        if self.values.keys().any(|key| {
+            let normalized = key.to_ascii_lowercase();
+            SECRET_TERMS.iter().any(|term| normalized.contains(term))
+        }) {
+            return Err(DomainError::SecretInSettings);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeginAuthRequest {
     pub connection_type: String,
     pub auth_scheme: AuthScheme,
     pub display_name: String,
+    #[serde(default)]
+    pub settings: ConnectionSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -462,6 +486,8 @@ pub enum AuthChallenge {
 pub struct CompleteAuthRequest {
     pub challenge_state: Option<String>,
     pub secret: Option<SecretString>,
+    pub connection_type: Option<String>,
+    pub settings: Option<ConnectionSettings>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -469,6 +495,7 @@ pub struct ConnectionIdentity {
     pub external_id: String,
     pub display_name: Option<String>,
     pub credential_ref: Option<CredentialRef>,
+    pub settings: Option<ConnectionSettings>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,6 +505,78 @@ pub struct ConnectionContext {
     /// Ephemeral material loaded by Provider Runtime. `SecretString` redacts its
     /// Debug representation and cannot be serialized.
     pub auth_secret: Option<SecretString>,
+    pub settings: ConnectionSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeasuredAmount {
+    #[serde(with = "rust_decimal::serde::str")]
+    pub value: Decimal,
+    pub unit: MetricUnit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageEvent {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub external_id: String,
+    pub occurred_at: DateTime<Utc>,
+    pub observed_at: DateTime<Utc>,
+    pub model: Option<String>,
+    pub input_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub request_count: u32,
+    pub actual_charge: Option<MeasuredAmount>,
+    pub upstream_charge: Option<MeasuredAmount>,
+    pub estimated_charge: Option<MeasuredAmount>,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    pub credit_used: Option<Decimal>,
+    pub provenance: Provenance,
+    pub source_event: String,
+    #[serde(default)]
+    pub dimensions: BTreeMap<String, String>,
+}
+
+impl UsageEvent {
+    pub fn validate(&self) -> Result<(), DomainError> {
+        let tokens = [
+            self.input_tokens,
+            self.cached_input_tokens,
+            self.output_tokens,
+            self.reasoning_tokens,
+            self.total_tokens,
+        ];
+        if self.external_id.trim().is_empty()
+            || self.request_count == 0
+            || tokens.into_iter().flatten().any(|value| value < 0)
+            || self.credit_used.is_some_and(|value| value < Decimal::ZERO)
+            || [
+                &self.actual_charge,
+                &self.upstream_charge,
+                &self.estimated_charge,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|amount| amount.value < Decimal::ZERO)
+        {
+            return Err(DomainError::InvalidUsageEvent);
+        }
+        MetricKey::new(self.source_event.clone()).map_err(|_| DomainError::InvalidUsageEvent)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderEvent {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub event_type: String,
+    pub observed_at: DateTime<Utc>,
+    #[serde(default)]
+    pub summary: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,6 +590,8 @@ pub struct SyncBatch {
     pub metric_samples: Vec<MetricSample>,
     pub quota_windows: Vec<QuotaWindow>,
     pub rate_limit_reset_credits: Option<RateLimitResetCredits>,
+    pub usage_events: Vec<UsageEvent>,
+    pub provider_events: Vec<ProviderEvent>,
     pub next_cursor: Option<SyncCursor>,
     pub provider_timestamp: Option<DateTime<Utc>>,
 }
@@ -606,6 +707,10 @@ pub enum DomainError {
     InvalidRatio,
     #[error("dedup key is not canonical")]
     InvalidDedupKey,
+    #[error("connection settings contain secret material")]
+    SecretInSettings,
+    #[error("invalid usage event")]
+    InvalidUsageEvent,
 }
 
 impl fmt::Display for MetricKey {
@@ -700,5 +805,45 @@ mod tests {
             serde_json::from_str::<AuthScheme>("\"oauth_device_code\"").unwrap(),
             AuthScheme::OAuthDeviceCode
         );
+    }
+    #[test]
+    fn usage_event_rejects_negative_values() {
+        let event = UsageEvent {
+            id: Uuid::new_v4(),
+            connection_id: Uuid::nil(),
+            external_id: "request-1".into(),
+            occurred_at: Utc::now(),
+            observed_at: Utc::now(),
+            model: None,
+            input_tokens: Some(-1),
+            cached_input_tokens: None,
+            output_tokens: None,
+            reasoning_tokens: None,
+            total_tokens: None,
+            request_count: 1,
+            actual_charge: None,
+            upstream_charge: None,
+            estimated_charge: None,
+            credit_used: None,
+            provenance: Provenance::ProviderReported,
+            source_event: "relay.usage".into(),
+            dimensions: BTreeMap::new(),
+        };
+        assert!(matches!(
+            event.validate(),
+            Err(DomainError::InvalidUsageEvent)
+        ));
+    }
+
+    #[test]
+    fn settings_reject_secret_keys() {
+        let settings = ConnectionSettings {
+            schema_version: 1,
+            values: BTreeMap::from([("api_key".into(), serde_json::json!("secret"))]),
+        };
+        assert!(matches!(
+            settings.validate_public(),
+            Err(DomainError::SecretInSettings)
+        ));
     }
 }

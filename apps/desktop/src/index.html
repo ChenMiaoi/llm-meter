@@ -2,15 +2,24 @@
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LLM Meter</title><link rel="stylesheet" href="styles.css"></head>
 <body>
-  <div class="shell" id="shell" tabindex="-1">
-    <header class="header">
-      <div class="brand"><span class="logo" aria-hidden="true">◩</span><div><h1>LLM Meter</h1><p id="scope">本地 Snapshot</p></div></div>
-      <div class="header-actions"><span id="sync-state" class="status">正在连接</span><button id="menu" class="icon" aria-label="窗口菜单">⋯</button><button id="close" class="icon" aria-label="关闭窗口">×</button></div>
-    </header>
-    <nav id="nav" aria-label="主导航"><button data-page="overview" class="active">概览</button><button data-page="usage">使用量</button><button data-page="costs" id="cost-nav">费用</button><button data-page="connections">连接</button><button data-page="settings">设置</button></nav>
-    <main id="content" aria-live="polite"><section class="card empty"><h2>正在读取 daemon</h2><p>历史数据仍由后台服务管理。</p></section></main>
-    <footer><span id="last-sync">尚未同步</span><div><button id="local-refresh">刷新视图</button><button id="provider-refresh">同步 Provider</button><button id="pin">打开主窗口</button></div></footer>
-  </div>
-  <script src="app.js"></script>
+<div class="app" id="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">◩</span><div><strong>LLM Meter</strong><small>Local observability</small></div></div>
+    <nav id="nav">
+      <button data-page="overview" class="active"><span>⌂</span>仪表盘</button>
+      <button data-page="usage"><span>◫</span>使用量</button>
+      <button data-page="costs" id="cost-nav"><span>◇</span>费用</button>
+      <button data-page="accounts"><span>◎</span>账户与 Provider</button>
+      <button data-page="settings"><span>⚙</span>设置</button>
+    </nav>
+    <div class="sidebar-foot"><i id="daemon-dot"></i><div><strong id="sync-state">正在连接</strong><small id="last-sync">本地 daemon</small></div></div>
+  </aside>
+  <section class="workspace">
+    <header class="topbar"><div><p class="eyebrow" id="page-eyebrow">OVERVIEW</p><h1 id="page-title">仪表盘</h1></div><div class="top-actions"><button id="local-refresh">刷新</button><button class="primary" data-page="accounts">添加连接</button><button id="close" class="icon" aria-label="关闭">×</button></div></header>
+    <main id="content"><section class="surface loading"><span class="spinner"></span><p>正在读取本地数据</p></section></main>
+  </section>
+</div>
+<div id="modal-root"></div>
+<script src="app.js"></script>
 </body>
 </html>

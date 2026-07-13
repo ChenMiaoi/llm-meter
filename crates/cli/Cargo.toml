@@ -11,9 +11,9 @@ categories.workspace = true
 description = "Command-line client and daemon executables for LLM Meter"
 [dependencies]
 clap.workspace = true
-llm-meter-core = { version = "0.1.0", path = "../core" }
-llm-meter-daemon = { version = "0.1.0", path = "../daemon" }
-llm-meter-secret-store = { version = "0.1.0", path = "../secret-store" }
+llm-meter-core = { version = "0.2.0", path = "../core" }
+llm-meter-daemon = { version = "0.2.0", path = "../daemon" }
+llm-meter-secret-store = { version = "0.2.0", path = "../secret-store" }
 rpassword.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true

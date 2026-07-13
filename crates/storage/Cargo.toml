@@ -12,7 +12,7 @@ description = "SQLite storage, migrations, and retention for LLM Meter"
 
 [dependencies]
 chrono.workspace = true
-llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-core = { version = "0.2.0", path = "../core" }
 rusqlite.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true

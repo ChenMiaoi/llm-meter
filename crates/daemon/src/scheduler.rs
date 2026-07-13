@@ -19,6 +19,7 @@ pub struct ProviderRuntime {
     secrets: Arc<dyn SecretStore>,
     running: Mutex<HashSet<Uuid>>,
     pending_auth: tokio::sync::Mutex<HashMap<String, PendingAuth>>,
+    proxies: Mutex<HashMap<Uuid, tokio::task::JoinHandle<()>>>,
     config: Arc<Config>,
 }
 
@@ -26,6 +27,7 @@ struct PendingAuth {
     provider_id: String,
     connection_type: String,
     display_name: String,
+    settings: llm_meter_core::ConnectionSettings,
 }
 
 impl ProviderRuntime {
@@ -44,6 +46,7 @@ impl ProviderRuntime {
             secrets,
             running: Mutex::new(HashSet::new()),
             pending_auth: tokio::sync::Mutex::new(HashMap::new()),
+            proxies: Mutex::new(HashMap::new()),
             config,
         }
     }
@@ -60,6 +63,7 @@ impl ProviderRuntime {
             .ok_or(ProviderError::CapabilityUnavailable)?;
         let connection_type = request.connection_type.clone();
         let display_name = request.display_name.clone();
+        let settings = request.settings.clone();
         let mut challenge = adapter.begin_auth(request).await?;
         let challenge_id = match &mut challenge {
             llm_meter_core::AuthChallenge::Browser { state, .. } => state.clone(),
@@ -76,6 +80,7 @@ impl ProviderRuntime {
                 provider_id: provider_id.into(),
                 connection_type,
                 display_name,
+                settings,
             },
         );
         Ok(challenge)
@@ -102,6 +107,8 @@ impl ProviderRuntime {
                 llm_meter_core::CompleteAuthRequest {
                     challenge_state: Some(challenge_id.into()),
                     secret,
+                    connection_type: Some(pending.connection_type.clone()),
+                    settings: Some(pending.settings.clone()),
                 },
                 self.secrets.as_ref(),
             )
@@ -122,10 +129,12 @@ impl ProviderRuntime {
             last_error_code: None,
             disabled_at: None,
         };
-        if let Err(error) = self
-            .repo
-            .add_authenticated_connection(&connection, credential.as_ref())
-        {
+        let settings = identity.settings.unwrap_or(pending.settings);
+        if let Err(error) = self.repo.add_authenticated_connection(
+            &connection,
+            credential.as_ref(),
+            Some(&settings),
+        ) {
             if let Some(reference) = &credential {
                 let _ = self.secrets.delete(reference).await;
             }
@@ -308,10 +317,12 @@ impl ProviderRuntime {
             Some(reference) => Some(self.secrets.get(reference).await?),
             None => None,
         };
+        let settings = self.repo.connection_settings(id).map_err(internal)?;
         let mut context = ConnectionContext {
             connection,
             credential_ref,
             auth_secret,
+            settings,
         };
         let connection_name = context.connection.display_name.clone();
         self.repo
@@ -381,7 +392,162 @@ impl ProviderRuntime {
         }
     }
 
+    pub async fn validate_openai_compatible(
+        &self,
+        origin: &str,
+        secret: secrecy::SecretString,
+    ) -> Result<llm_meter_provider_relay::CompatibilityReport, ProviderError> {
+        llm_meter_provider_relay::validate_openai_compatible(origin, &secret).await
+    }
+
+    pub fn create_proxy_credential(
+        &self,
+        id: Uuid,
+        display_name: &str,
+        custom_token: Option<&str>,
+    ) -> Result<(llm_meter_storage::ProxyCredential, String), ProviderError> {
+        if display_name.trim().is_empty() {
+            return Err(ProviderError::InvalidResponse);
+        }
+        let token = custom_token
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("llm-local-{}", Uuid::new_v4().simple()));
+        if token.len() < 24 {
+            return Err(ProviderError::InvalidResponse);
+        }
+        let credential = llm_meter_storage::ProxyCredential {
+            id: Uuid::new_v4(),
+            connection_id: id,
+            display_name: display_name.trim().into(),
+            token_hash: proxy_token_hash(&token),
+            token_prefix: token.chars().take(16).collect(),
+            created_at: Utc::now(),
+            last_used_at: None,
+            disabled_at: None,
+        };
+        self.repo
+            .create_proxy_credential(&credential)
+            .map_err(internal)?;
+        Ok((credential, token))
+    }
+
+    pub fn proxy_credentials(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<llm_meter_storage::ProxyCredential>, ProviderError> {
+        self.repo.proxy_credentials(id).map_err(internal)
+    }
+
+    pub fn disable_proxy_credential(
+        &self,
+        id: Uuid,
+        credential_id: Uuid,
+    ) -> Result<bool, ProviderError> {
+        self.repo
+            .disable_proxy_credential(id, credential_id)
+            .map_err(internal)
+    }
+
+    pub async fn start_proxy(&self, id: Uuid) -> Result<(), ProviderError> {
+        let connection = self
+            .repo
+            .connection(id)
+            .map_err(internal)?
+            .ok_or_else(|| ProviderError::Internal("connection not found".into()))?;
+        if connection.connection_type != "openai_compatible_proxy" {
+            return Err(ProviderError::CapabilityUnavailable);
+        }
+        let settings = self.repo.connection_settings(id).map_err(internal)?;
+        let origin = settings
+            .values
+            .get("origin")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(ProviderError::InvalidResponse)?
+            .parse()
+            .map_err(|_| ProviderError::InvalidResponse)?;
+        let listen = settings
+            .values
+            .get("listen")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("127.0.0.1:18456")
+            .parse()
+            .map_err(|_| ProviderError::InvalidResponse)?;
+        let reference = connection
+            .credential_ref_id
+            .and_then(|id| self.repo.credential_ref(id).ok().flatten())
+            .ok_or(ProviderError::AuthenticationRequired)?;
+        let upstream_token = self.secrets.get(&reference).await?;
+        if self
+            .repo
+            .proxy_credentials(id)
+            .map_err(internal)?
+            .iter()
+            .all(|credential| credential.disabled_at.is_some())
+        {
+            self.create_proxy_credential(id, "Default", None)?;
+        }
+        let token_authenticator = Arc::new(RepositoryTokenAuthenticator {
+            connection_id: id,
+            repository: self.repo.clone(),
+        });
+        let config = llm_meter_relay_proxy::ProxyConfig {
+            connection_id: id,
+            listen,
+            origin,
+            token_authenticator,
+            upstream_token,
+        };
+        let repository = self.repo.clone();
+        let mut proxies = self
+            .proxies
+            .lock()
+            .map_err(|_| ProviderError::Internal("proxy lock poisoned".into()))?;
+        if proxies.contains_key(&id) {
+            return Ok(());
+        }
+        proxies.insert(
+            id,
+            tokio::spawn(async move {
+                let _ = llm_meter_relay_proxy::serve(config, repository).await;
+            }),
+        );
+        Ok(())
+    }
+
+    pub fn stop_proxy(&self, id: Uuid) -> Result<bool, ProviderError> {
+        let handle = self
+            .proxies
+            .lock()
+            .map_err(|_| ProviderError::Internal("proxy lock poisoned".into()))?
+            .remove(&id);
+        if let Some(handle) = handle {
+            handle.abort();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn proxy_listen(&self, id: Uuid) -> Result<String, ProviderError> {
+        let settings = self.repo.connection_settings(id).map_err(internal)?;
+        Ok(settings
+            .values
+            .get("listen")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("127.0.0.1:18456")
+            .to_owned())
+    }
+
+    pub fn proxy_running(&self, id: Uuid) -> Result<bool, ProviderError> {
+        Ok(self
+            .proxies
+            .lock()
+            .map_err(|_| ProviderError::Internal("proxy lock poisoned".into()))?
+            .get(&id)
+            .is_some_and(|handle| !handle.is_finished()))
+    }
+
     pub async fn remove(&self, id: Uuid) -> Result<(), ProviderError> {
+        let _ = self.stop_proxy(id);
         let connection = self
             .repo
             .connection(id)
@@ -391,10 +557,12 @@ impl ProviderRuntime {
             .credential_ref_id
             .and_then(|id| self.repo.credential_ref(id).ok().flatten());
         let fallback_credential = credential_ref.clone();
+        let settings = self.repo.connection_settings(id).map_err(internal)?;
         let context = ConnectionContext {
             connection,
             credential_ref,
             auth_secret: None,
+            settings,
         };
         if let Some(adapter) = self.adapters.get(&(
             context.connection.provider_id.clone(),
@@ -407,6 +575,26 @@ impl ProviderRuntime {
         self.repo.remove_connection(id).map_err(internal)?;
         Ok(())
     }
+}
+
+struct RepositoryTokenAuthenticator {
+    connection_id: Uuid,
+    repository: Arc<Repository>,
+}
+
+impl llm_meter_relay_proxy::ProxyTokenAuthenticator for RepositoryTokenAuthenticator {
+    fn authenticate(&self, token: &str) -> Option<String> {
+        self.repository
+            .authenticate_proxy_credential(self.connection_id, &proxy_token_hash(token))
+            .ok()
+            .flatten()
+            .map(|credential| credential.display_name)
+    }
+}
+
+fn proxy_token_hash(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 fn internal(error: impl std::fmt::Display) -> ProviderError {
@@ -582,6 +770,7 @@ mod tests {
                     connection_type: "fixture".into(),
                     auth_scheme: AuthScheme::Manual,
                     display_name: "Test Mock".into(),
+                    settings: Default::default(),
                 },
                 "mock",
             )
@@ -613,6 +802,7 @@ mod tests {
                     connection_type: "fixture".into(),
                     auth_scheme: AuthScheme::Manual,
                     display_name: "Test Mock".into(),
+                    settings: Default::default(),
                 },
                 "mock",
             )

@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 const MIGRATION_1: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_2: &str = include_str!("../migrations/0002_reset_credits.sql");
+const MIGRATION_3: &str = include_str!("../migrations/0003_relay_support.sql");
+const MIGRATION_4: &str = include_str!("../migrations/0004_proxy_credentials.sql");
 type BudgetRow = (String, String, String, String, String, String, String, i64);
 
 #[derive(Debug, thiserror::Error)]
@@ -78,6 +80,16 @@ impl Repository {
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, ?1)",
             [Utc::now().to_rfc3339()],
         )?;
+        tx.execute_batch(MIGRATION_3)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(3, ?1)",
+            [Utc::now().to_rfc3339()],
+        )?;
+        tx.execute_batch(MIGRATION_4)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(4, ?1)",
+            [Utc::now().to_rfc3339()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -109,14 +121,47 @@ impl Repository {
         &self,
         c: &Connection,
         credential: Option<&CredentialRef>,
+        settings: Option<&ConnectionSettings>,
     ) -> Result<(), StorageError> {
+        if let Some(settings) = settings {
+            settings.validate_public()?;
+        }
         let mut db = self.db()?;
         let tx = db.transaction()?;
         if let Some(r) = credential {
             tx.execute("INSERT INTO credential_refs(id,backend,service_name,secret_key,created_at) VALUES(?1,?2,?3,?4,?5)",params![r.id.to_string(),r.backend,r.service_name,r.secret_key,r.created_at.to_rfc3339()])?;
         }
         tx.execute("INSERT INTO connections(id,provider_id,connection_type,display_name,account_external_id,status,credential_ref_id,created_at,updated_at,last_success_at,last_error_code,disabled_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![c.id.to_string(),c.provider_id,c.connection_type,c.display_name,c.account_external_id,js(&c.status)?,c.credential_ref_id.map(|v|v.to_string()),c.created_at.to_rfc3339(),c.updated_at.to_rfc3339(),c.last_success_at.map(|v|v.to_rfc3339()),c.last_error_code,c.disabled_at.map(|v|v.to_rfc3339())])?;
+        if let Some(settings) = settings {
+            tx.execute("INSERT INTO connection_settings(connection_id,schema_version,settings_json,updated_at) VALUES(?1,?2,?3,?4)", params![c.id.to_string(), settings.schema_version, js(&settings.values)?, Utc::now().to_rfc3339()])?;
+        }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn connection_settings(&self, id: Uuid) -> Result<ConnectionSettings, StorageError> {
+        let row: Option<(u32, String)> = self.db()?.query_row(
+            "SELECT schema_version,settings_json FROM connection_settings WHERE connection_id=?1",
+            [id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        row.map(|(schema_version, values)| {
+            Ok(ConnectionSettings {
+                schema_version,
+                values: serde_json::from_str(&values)?,
+            })
+        })
+        .transpose()
+        .map(|value| value.unwrap_or_default())
+    }
+
+    pub fn update_connection_settings(
+        &self,
+        id: Uuid,
+        settings: &ConnectionSettings,
+    ) -> Result<(), StorageError> {
+        settings.validate_public()?;
+        self.db()?.execute("INSERT INTO connection_settings(connection_id,schema_version,settings_json,updated_at) VALUES(?1,?2,?3,?4) ON CONFLICT(connection_id) DO UPDATE SET schema_version=excluded.schema_version,settings_json=excluded.settings_json,updated_at=excluded.updated_at", params![id.to_string(), settings.schema_version, js(&settings.values)?, Utc::now().to_rfc3339()])?;
         Ok(())
     }
 
@@ -270,6 +315,14 @@ impl Repository {
                         })
                 })
             || batch
+                .usage_events
+                .iter()
+                .any(|value| value.connection_id != connection_id)
+            || batch
+                .provider_events
+                .iter()
+                .any(|value| value.connection_id != connection_id)
+            || batch
                 .capability_snapshot
                 .as_ref()
                 .is_some_and(|value| value.connection_id != connection_id)
@@ -278,6 +331,9 @@ impl Repository {
         }
         for metric in &batch.metric_samples {
             metric.validate()?;
+        }
+        for event in &batch.usage_events {
+            event.validate()?;
         }
         let normalized_quotas = batch
             .quota_windows
@@ -298,6 +354,17 @@ impl Repository {
         }
         for m in &batch.metric_samples {
             insert_metric(&tx, m)?;
+        }
+        let mut affected_days = std::collections::BTreeSet::new();
+        for event in &batch.usage_events {
+            insert_usage_event(&tx, event)?;
+            affected_days.insert(event.occurred_at.date_naive());
+        }
+        for event in &batch.provider_events {
+            tx.execute("INSERT INTO provider_events(id,connection_id,event_type,observed_at,summary_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at,summary_json=excluded.summary_json", params![event.id.to_string(), event.connection_id.to_string(), event.event_type, event.observed_at.to_rfc3339(), js(&event.summary)?])?;
+        }
+        for day in affected_days {
+            rebuild_daily_rollups(&tx, connection_id, day)?;
         }
         for q in &normalized_quotas {
             insert_quota(&tx, q)?;
@@ -709,6 +776,323 @@ impl Repository {
         self.db()?.execute("INSERT INTO alerts(id,connection_id,kind,threshold,state,last_triggered_at,suppressed_until) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,threshold=excluded.threshold,state=excluded.state,last_triggered_at=excluded.last_triggered_at,suppressed_until=excluded.suppressed_until",params![alert.id.to_string(),alert.connection_id.to_string(),js(&alert.kind)?,alert.threshold.to_string(),js(&alert.state)?,alert.last_triggered_at.map(|v|v.to_rfc3339()),alert.suppressed_until.map(|v|v.to_rfc3339())])?;
         Ok(())
     }
+    pub fn create_proxy_credential(
+        &self,
+        credential: &ProxyCredential,
+    ) -> Result<(), StorageError> {
+        self.db()?.execute(
+            "INSERT INTO proxy_credentials(id,connection_id,display_name,token_hash,token_prefix,created_at,last_used_at,disabled_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![credential.id.to_string(), credential.connection_id.to_string(), credential.display_name, credential.token_hash, credential.token_prefix, credential.created_at.to_rfc3339(), credential.last_used_at.map(|v|v.to_rfc3339()), credential.disabled_at.map(|v|v.to_rfc3339())],
+        )?;
+        Ok(())
+    }
+
+    pub fn proxy_credentials(
+        &self,
+        connection_id: Uuid,
+    ) -> Result<Vec<ProxyCredential>, StorageError> {
+        let db = self.db()?;
+        let mut statement = db.prepare("SELECT id,display_name,token_hash,token_prefix,created_at,last_used_at,disabled_at FROM proxy_credentials WHERE connection_id=?1 ORDER BY created_at")?;
+        let rows = statement.query_map([connection_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let row = row?;
+            Ok(ProxyCredential {
+                id: Uuid::parse_str(&row.0)?,
+                connection_id,
+                display_name: row.1,
+                token_hash: row.2,
+                token_prefix: row.3,
+                created_at: dt(&row.4)?,
+                last_used_at: row.5.map(|v| dt(&v)).transpose()?,
+                disabled_at: row.6.map(|v| dt(&v)).transpose()?,
+            })
+        })
+        .collect()
+    }
+
+    pub fn authenticate_proxy_credential(
+        &self,
+        connection_id: Uuid,
+        token_hash: &str,
+    ) -> Result<Option<ProxyCredential>, StorageError> {
+        let credential = self
+            .proxy_credentials(connection_id)?
+            .into_iter()
+            .find(|credential| {
+                credential.token_hash == token_hash && credential.disabled_at.is_none()
+            });
+        if let Some(credential) = &credential {
+            self.db()?.execute(
+                "UPDATE proxy_credentials SET last_used_at=?2 WHERE id=?1",
+                params![credential.id.to_string(), Utc::now().to_rfc3339()],
+            )?;
+        }
+        Ok(credential)
+    }
+
+    pub fn disable_proxy_credential(
+        &self,
+        connection_id: Uuid,
+        credential_id: Uuid,
+    ) -> Result<bool, StorageError> {
+        Ok(self.db()?.execute("UPDATE proxy_credentials SET disabled_at=?3 WHERE id=?1 AND connection_id=?2 AND disabled_at IS NULL", params![credential_id.to_string(),connection_id.to_string(),Utc::now().to_rfc3339()])? > 0)
+    }
+
+    pub fn usage_events(&self, id: Uuid, limit: usize) -> Result<Vec<UsageEvent>, StorageError> {
+        let db = self.db()?;
+        let mut statement = db.prepare("SELECT id,external_id,occurred_at,observed_at,model,input_tokens,cached_input_tokens,output_tokens,reasoning_tokens,total_tokens,request_count,actual_charge_value,actual_charge_unit,upstream_charge_value,upstream_charge_unit,estimated_charge_value,estimated_charge_unit,credit_used_value,provenance,source_event,dimensions_json FROM usage_events WHERE connection_id=?1 ORDER BY occurred_at DESC LIMIT ?2")?;
+        let rows = statement.query_map(params![id.to_string(), limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, Option<String>>(14)?,
+                row.get::<_, Option<String>>(15)?,
+                row.get::<_, Option<String>>(16)?,
+                row.get::<_, Option<String>>(17)?,
+                row.get::<_, String>(18)?,
+                row.get::<_, String>(19)?,
+                row.get::<_, String>(20)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let r = row?;
+            Ok(UsageEvent {
+                id: Uuid::parse_str(&r.0)?,
+                connection_id: id,
+                external_id: r.1,
+                occurred_at: dt(&r.2)?,
+                observed_at: dt(&r.3)?,
+                model: r.4,
+                input_tokens: r.5,
+                cached_input_tokens: r.6,
+                output_tokens: r.7,
+                reasoning_tokens: r.8,
+                total_tokens: r.9,
+                request_count: r.10.max(0) as u32,
+                actual_charge: amount(r.11, r.12)?,
+                upstream_charge: amount(r.13, r.14)?,
+                estimated_charge: amount(r.15, r.16)?,
+                credit_used: dec(r.17)?,
+                provenance: serde_json::from_str(&r.18)?,
+                source_event: r.19,
+                dimensions: serde_json::from_str(&r.20)?,
+            })
+        })
+        .collect()
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProxyCredential {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub display_name: String,
+    #[serde(skip_serializing)]
+    pub token_hash: String,
+    pub token_prefix: String,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub disabled_at: Option<DateTime<Utc>>,
+}
+
+fn insert_usage_event(tx: &Transaction<'_>, event: &UsageEvent) -> Result<(), StorageError> {
+    tx.execute("INSERT INTO usage_events(id,connection_id,external_id,occurred_at,observed_at,model,input_tokens,cached_input_tokens,output_tokens,reasoning_tokens,total_tokens,request_count,actual_charge_value,actual_charge_unit,upstream_charge_value,upstream_charge_unit,estimated_charge_value,estimated_charge_unit,credit_used_value,provenance,source_event,dimensions_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22) ON CONFLICT(connection_id,source_event,external_id) DO UPDATE SET occurred_at=excluded.occurred_at,observed_at=excluded.observed_at,model=excluded.model,input_tokens=excluded.input_tokens,cached_input_tokens=excluded.cached_input_tokens,output_tokens=excluded.output_tokens,reasoning_tokens=excluded.reasoning_tokens,total_tokens=excluded.total_tokens,request_count=excluded.request_count,actual_charge_value=excluded.actual_charge_value,actual_charge_unit=excluded.actual_charge_unit,upstream_charge_value=excluded.upstream_charge_value,upstream_charge_unit=excluded.upstream_charge_unit,estimated_charge_value=excluded.estimated_charge_value,estimated_charge_unit=excluded.estimated_charge_unit,credit_used_value=excluded.credit_used_value,provenance=excluded.provenance,dimensions_json=excluded.dimensions_json", params![event.id.to_string(),event.connection_id.to_string(),event.external_id,event.occurred_at.to_rfc3339(),event.observed_at.to_rfc3339(),event.model,event.input_tokens,event.cached_input_tokens,event.output_tokens,event.reasoning_tokens,event.total_tokens,event.request_count,event.actual_charge.as_ref().map(|v|v.value.to_string()),event.actual_charge.as_ref().map(|v|js(&v.unit)).transpose()?,event.upstream_charge.as_ref().map(|v|v.value.to_string()),event.upstream_charge.as_ref().map(|v|js(&v.unit)).transpose()?,event.estimated_charge.as_ref().map(|v|v.value.to_string()),event.estimated_charge.as_ref().map(|v|js(&v.unit)).transpose()?,event.credit_used.map(|v|v.to_string()),js(&event.provenance)?,event.source_event,js(&event.dimensions)?])?;
+    Ok(())
+}
+
+fn rebuild_daily_rollups(
+    tx: &Transaction<'_>,
+    connection_id: Uuid,
+    day: chrono::NaiveDate,
+) -> Result<(), StorageError> {
+    let start = day.and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let end = start + chrono::Duration::days(1);
+    tx.execute("DELETE FROM metric_samples WHERE connection_id=?1 AND source_metric IN ('llm_meter.usage_events.daily','llm_meter.usage_events.daily_model') AND period_start=?2", params![connection_id.to_string(), start.to_rfc3339()])?;
+    for model in [None].into_iter().chain(
+        models_for_day(tx, connection_id, start, end)?
+            .into_iter()
+            .map(Some),
+    ) {
+        let mut statement = tx.prepare("SELECT input_tokens,cached_input_tokens,output_tokens,reasoning_tokens,total_tokens,request_count,actual_charge_value,actual_charge_unit,upstream_charge_value,upstream_charge_unit,estimated_charge_value,estimated_charge_unit,credit_used_value,provenance FROM usage_events WHERE connection_id=?1 AND occurred_at>=?2 AND occurred_at<?3 AND (?4 IS NULL OR model=?4)")?;
+        let rows = statement.query_map(
+            params![
+                connection_id.to_string(),
+                start.to_rfc3339(),
+                end.to_rfc3339(),
+                model
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, String>(13)?,
+                ))
+            },
+        )?;
+        let mut totals: std::collections::BTreeMap<
+            (String, String),
+            (Decimal, MetricUnit, Provenance),
+        > = std::collections::BTreeMap::new();
+        for row in rows {
+            let r = row?;
+            for (key, value, unit) in [
+                (
+                    MetricKey::TOKEN_INPUT,
+                    r.0.map(Decimal::from),
+                    MetricUnit::Token,
+                ),
+                (
+                    MetricKey::TOKEN_CACHED_INPUT,
+                    r.1.map(Decimal::from),
+                    MetricUnit::Token,
+                ),
+                (
+                    MetricKey::TOKEN_OUTPUT,
+                    r.2.map(Decimal::from),
+                    MetricUnit::Token,
+                ),
+                (
+                    MetricKey::TOKEN_REASONING_OUTPUT,
+                    r.3.map(Decimal::from),
+                    MetricUnit::Token,
+                ),
+                (
+                    MetricKey::TOKEN_TOTAL,
+                    r.4.map(Decimal::from),
+                    MetricUnit::Token,
+                ),
+                (
+                    MetricKey::REQUEST_COUNT,
+                    Some(Decimal::from(r.5)),
+                    MetricUnit::Request,
+                ),
+                (MetricKey::CREDIT_USED, dec(r.12)?, MetricUnit::Credit),
+            ] {
+                if let Some(value) = value {
+                    let entry = totals.entry((key.into(), js(&unit)?)).or_insert((
+                        Decimal::ZERO,
+                        unit,
+                        serde_json::from_str(&r.13)?,
+                    ));
+                    entry.0 += value;
+                }
+            }
+            for (key, value, unit) in [
+                (MetricKey::COST_ACTUAL, r.6, r.7),
+                (MetricKey::COST_UPSTREAM, r.8, r.9),
+                (MetricKey::COST_ESTIMATED, r.10, r.11),
+            ] {
+                if let (Some(value), Some(unit)) = (value, unit) {
+                    let unit: MetricUnit = serde_json::from_str(&unit)?;
+                    let entry = totals.entry((key.into(), js(&unit)?)).or_insert((
+                        Decimal::ZERO,
+                        unit,
+                        serde_json::from_str(&r.13)?,
+                    ));
+                    entry.0 += value.parse::<Decimal>()?;
+                }
+            }
+        }
+        for ((key, _), (value, unit, provenance)) in totals {
+            let mut dimensions = std::collections::BTreeMap::from([
+                ("aggregation".into(), "daily".into()),
+                ("timezone".into(), "UTC".into()),
+            ]);
+            if let Some(model) = &model {
+                dimensions.insert("model".into(), model.clone());
+            }
+            let mut metric = MetricSample {
+                id: Uuid::new_v4(),
+                connection_id,
+                metric_key: MetricKey(key),
+                value,
+                unit,
+                scope: if model.is_some() {
+                    MetricScope::Model
+                } else {
+                    MetricScope::Account
+                },
+                period_start: Some(start),
+                period_end: Some(end),
+                observed_at: Utc::now(),
+                provenance,
+                dimensions,
+                source_metric: if model.is_some() {
+                    "llm_meter.usage_events.daily_model".into()
+                } else {
+                    "llm_meter.usage_events.daily".into()
+                },
+                dedup_key: String::new(),
+            };
+            metric.dedup_key = metric.compute_dedup_key();
+            insert_metric(tx, &metric)?;
+        }
+    }
+    Ok(())
+}
+
+fn models_for_day(
+    tx: &Transaction<'_>,
+    connection_id: Uuid,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement=tx.prepare("SELECT DISTINCT model FROM usage_events WHERE connection_id=?1 AND occurred_at>=?2 AND occurred_at<?3 AND model IS NOT NULL")?;
+    let rows = statement.query_map(
+        params![
+            connection_id.to_string(),
+            start.to_rfc3339(),
+            end.to_rfc3339()
+        ],
+        |row| row.get(0),
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn amount(
+    value: Option<String>,
+    unit: Option<String>,
+) -> Result<Option<MeasuredAmount>, StorageError> {
+    match (value, unit) {
+        (Some(value), Some(unit)) => Ok(Some(MeasuredAmount {
+            value: value.parse()?,
+            unit: serde_json::from_str(&unit)?,
+        })),
+        _ => Ok(None),
+    }
 }
 
 fn insert_metric(tx: &Transaction<'_>, m: &MetricSample) -> Result<(), StorageError> {
@@ -735,7 +1119,7 @@ mod tests {
     #[test]
     fn migrates_and_cascades() {
         let r = Repository::in_memory().unwrap();
-        assert_eq!(r.schema_version().unwrap(), 2);
+        assert_eq!(r.schema_version().unwrap(), 4);
         let now = Utc::now();
         let c = Connection {
             id: Uuid::new_v4(),
@@ -923,5 +1307,142 @@ mod tests {
         let remaining = r.metrics(c.id, None, 10).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].source_metric, "day");
+    }
+    #[test]
+    fn proxy_credentials_are_independent_and_revocable() {
+        let repository = Repository::in_memory().unwrap();
+        let now = Utc::now();
+        let connection = Connection {
+            id: Uuid::new_v4(),
+            provider_id: "relay".into(),
+            connection_type: "openai_compatible_proxy".into(),
+            display_name: "Relay".into(),
+            account_external_id: None,
+            status: ConnectionStatus::Ready,
+            credential_ref_id: None,
+            created_at: now,
+            updated_at: now,
+            last_success_at: None,
+            last_error_code: None,
+            disabled_at: None,
+        };
+        repository.add_connection(&connection).unwrap();
+        for (name, hash) in [("Codex", "hash-a"), ("Cursor", "hash-b")] {
+            repository
+                .create_proxy_credential(&ProxyCredential {
+                    id: Uuid::new_v4(),
+                    connection_id: connection.id,
+                    display_name: name.into(),
+                    token_hash: hash.into(),
+                    token_prefix: hash.into(),
+                    created_at: now,
+                    last_used_at: None,
+                    disabled_at: None,
+                })
+                .unwrap();
+        }
+        let credentials = repository.proxy_credentials(connection.id).unwrap();
+        assert_eq!(credentials.len(), 2);
+        assert_eq!(
+            repository
+                .authenticate_proxy_credential(connection.id, "hash-a")
+                .unwrap()
+                .unwrap()
+                .display_name,
+            "Codex"
+        );
+        repository
+            .disable_proxy_credential(connection.id, credentials[0].id)
+            .unwrap();
+        assert!(
+            repository
+                .authenticate_proxy_credential(connection.id, "hash-a")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            repository
+                .authenticate_proxy_credential(connection.id, "hash-b")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn usage_event_upsert_rebuilds_daily_rollup() {
+        let repository = Repository::in_memory().unwrap();
+        let now = Utc::now();
+        let connection = Connection {
+            id: Uuid::new_v4(),
+            provider_id: "relay".into(),
+            connection_type: "new_api".into(),
+            display_name: "Relay".into(),
+            account_external_id: None,
+            status: ConnectionStatus::Syncing,
+            credential_ref_id: None,
+            created_at: now,
+            updated_at: now,
+            last_success_at: None,
+            last_error_code: None,
+            disabled_at: None,
+        };
+        repository.add_connection(&connection).unwrap();
+        let event = UsageEvent {
+            id: Uuid::new_v4(),
+            connection_id: connection.id,
+            external_id: "req-1".into(),
+            occurred_at: now,
+            observed_at: now,
+            model: Some("gpt-test".into()),
+            input_tokens: Some(10),
+            cached_input_tokens: Some(2),
+            output_tokens: Some(5),
+            reasoning_tokens: None,
+            total_tokens: Some(15),
+            request_count: 1,
+            actual_charge: None,
+            upstream_charge: None,
+            estimated_charge: None,
+            credit_used: Some(Decimal::new(25, 2)),
+            provenance: Provenance::ProviderReported,
+            source_event: "new_api.log".into(),
+            dimensions: Default::default(),
+        };
+        repository
+            .commit_sync_batch(
+                connection.id,
+                "usage",
+                &SyncBatch {
+                    usage_events: vec![event.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut corrected = event;
+        corrected.input_tokens = Some(20);
+        corrected.total_tokens = Some(25);
+        repository
+            .commit_sync_batch(
+                connection.id,
+                "usage",
+                &SyncBatch {
+                    usage_events: vec![corrected],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            repository.usage_events(connection.id, 10).unwrap()[0].input_tokens,
+            Some(20)
+        );
+        let metrics = repository
+            .metrics(connection.id, Some(MetricKey::TOKEN_INPUT), 10)
+            .unwrap();
+        assert_eq!(metrics.len(), 2);
+        assert!(
+            metrics
+                .iter()
+                .all(|metric| metric.value == Decimal::from(20))
+        );
     }
 }

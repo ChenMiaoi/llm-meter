@@ -17,7 +17,7 @@ Item {
     property string details: "llm-meter daemon is unavailable"
     property var latestValue: null
 
-    implicitWidth: pill.width
+    implicitWidth: pill.implicitWidth
     implicitHeight: pill.height
 
     function consume(line) {

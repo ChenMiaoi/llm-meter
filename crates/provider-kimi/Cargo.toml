@@ -13,7 +13,7 @@ description = "Kimi (Moonshot AI) subscription adapter for LLM Meter"
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
-llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-core = { version = "0.2.0", path = "../core" }
 reqwest.workspace = true
 rust_decimal.workspace = true
 secrecy.workspace = true

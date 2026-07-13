@@ -42,22 +42,40 @@ async fn remove_connection(connection_id: String) -> Result<Value, String> {
 
 #[tauri::command]
 async fn begin_auth(
+    provider_id: String,
     connection_type: String,
     display_name: String,
     auth_scheme: String,
+    settings: Option<Value>,
 ) -> Result<Value, String> {
     ipc::call(
         &socket_path().map_err(|e| e.to_string())?,
         "connections/add",
         json!({
-            "provider_id": "openai",
+            "provider_id": provider_id,
             "connection_type": connection_type,
             "display_name": display_name,
             "auth_scheme": auth_scheme,
+            "settings": settings.unwrap_or_else(|| json!({"schema_version":0,"values":{}})),
         }),
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn validate_compatible(origin: String, secret: String) -> Result<Value, String> {
+    let result = ipc::call(&socket_path().map_err(|e| e.to_string())?, "connections/validate-compatible", json!({"origin":origin,"secret":secret})).await.map_err(|e|e.to_string());
+    drop(secret);
+    result
+}
+
+#[tauri::command]
+async fn proxy_action(method: String, connection_id: String, display_name: Option<String>, credential_id: Option<String>, token: Option<String>) -> Result<Value,String> {
+    if !matches!(method.as_str(), "proxy/status"|"proxy/start"|"proxy/stop"|"proxy/credentials/list"|"proxy/credentials/create"|"proxy/credentials/disable") { return Err("unsupported proxy action".into()); }
+    let result=ipc::call(&socket_path().map_err(|e|e.to_string())?,&method,json!({"connection_id":connection_id,"display_name":display_name,"credential_id":credential_id,"token":token})).await.map_err(|e|e.to_string());
+    drop(token);
+    result
 }
 
 #[tauri::command]
@@ -195,6 +213,8 @@ fn main() {
             remove_connection,
             begin_auth,
             complete_auth,
+            validate_compatible,
+            proxy_action,
             open_auth_url,
             close_surface,
             activate

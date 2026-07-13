@@ -207,6 +207,7 @@ impl ProviderAdapter for SubscriptionAdapter {
             external_id: "kimi-code".into(),
             display_name: Some(pending.display_name),
             credential_ref: Some(credential_ref),
+            settings: None,
         })
     }
 
@@ -327,6 +328,8 @@ impl ProviderAdapter for SubscriptionAdapter {
             metric_samples: metrics,
             quota_windows,
             rate_limit_reset_credits: None,
+            usage_events: Vec::new(),
+            provider_events: Vec::new(),
             next_cursor: None,
             provider_timestamp: Some(observed),
         })

@@ -7,6 +7,7 @@ use llm_meter_provider_kimi::subscription::SubscriptionAdapter as KimiSubscripti
 use llm_meter_provider_openai::{
     platform::AdminAdapter, standard::StandardAdapter, subscription::SubscriptionAdapter,
 };
+use llm_meter_provider_relay::RelayAdapter;
 use llm_meter_secret_store::NativeSecretStore;
 use llm_meter_storage::Repository;
 use std::{
@@ -66,7 +67,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "platform_standard",
         Arc::new(StandardAdapter::default()),
     );
+    let relay = Arc::new(RelayAdapter::default());
+    runtime.register("relay", "new_api", relay.clone());
+    runtime.register("relay", "openrouter", relay.clone());
+    runtime.register("relay", "openai_compatible_proxy", relay);
     let runtime = Arc::new(runtime);
+    for connection in repo.list_connections()? {
+        if connection.connection_type == "openai_compatible_proxy"
+            && connection.disabled_at.is_none()
+        {
+            let _ = runtime.start_proxy(connection.id).await;
+        }
+    }
     let scheduler = Scheduler::new(runtime.clone());
     tokio::spawn(async move { scheduler.run().await });
     tokio::spawn(monitor_local_codex());

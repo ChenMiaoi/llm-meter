@@ -89,6 +89,7 @@ impl ProviderAdapter for StandardAdapter {
             external_id: "openai-standard-api-key".into(),
             display_name: Some("OpenAI Platform API".into()),
             credential_ref: Some(reference),
+            settings: None,
         })
     }
 

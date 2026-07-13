@@ -105,6 +105,7 @@ impl ProviderAdapter for MockProvider {
             external_id: "mock-account".into(),
             display_name: Some("Mock Account".into()),
             credential_ref: None,
+            settings: None,
         })
     }
     async fn probe_capabilities(
@@ -171,6 +172,7 @@ mod tests {
             },
             credential_ref: None,
             auth_secret: None,
+            settings: ConnectionSettings::default(),
         };
         verify_contract(&MockProvider, &context).await.unwrap();
         let _ = MemorySecretStore::default();
