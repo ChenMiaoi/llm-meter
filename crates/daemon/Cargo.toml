@@ -12,6 +12,7 @@ description = "Local-first provider scheduler, Codex collector, and IPC runtime 
 [dependencies]
 chrono.workspace = true
 llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-provider-kimi = { version = "0.1.0", path = "../provider-kimi" }
 llm-meter-provider-openai = { version = "0.1.0", path = "../provider-openai" }
 llm-meter-secret-store = { version = "0.1.0", path = "../secret-store" }
 llm-meter-storage = { version = "0.1.0", path = "../storage" }
@@ -28,4 +29,5 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 llm-meter-provider-testkit = { version = "0.1.0", path = "../provider-testkit" }

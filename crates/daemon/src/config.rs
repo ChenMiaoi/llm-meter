@@ -80,7 +80,7 @@ impl Config {
     }
     pub fn interval_for(&self, connection_type: &str) -> u64 {
         match connection_type {
-            "chatgpt_subscription" => self.subscription_sync_seconds,
+            "chatgpt_subscription" | "kimi_code_subscription" => self.subscription_sync_seconds,
             "platform_admin" => self.platform_usage_sync_seconds,
             _ => self.platform_usage_sync_seconds,
         }

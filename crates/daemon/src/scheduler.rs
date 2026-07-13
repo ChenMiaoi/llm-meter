@@ -308,7 +308,7 @@ impl ProviderRuntime {
             Some(reference) => Some(self.secrets.get(reference).await?),
             None => None,
         };
-        let context = ConnectionContext {
+        let mut context = ConnectionContext {
             connection,
             credential_ref,
             auth_secret,
@@ -317,11 +317,32 @@ impl ProviderRuntime {
         self.repo
             .set_connection_status(id, ConnectionStatus::Syncing)
             .map_err(internal)?;
-        let cursor = self.repo.sync_cursor(id, "default").map_err(internal)?;
-        let outcome = tokio::time::timeout(Duration::from_secs(90), adapter.sync(&context, cursor))
-            .await
-            .map_err(|_| ProviderError::Timeout)
-            .and_then(|value| value);
+
+        let outcome = tokio::time::timeout(Duration::from_secs(90), async {
+            if let Some(new_secret) = adapter
+                .refresh_credentials(&context, self.secrets.as_ref())
+                .await?
+            {
+                let reference = context
+                    .credential_ref
+                    .as_ref()
+                    .ok_or(ProviderError::AuthenticationRequired)?;
+                self.secrets
+                    .put(
+                        &reference.service_name,
+                        &reference.secret_key,
+                        new_secret.clone(),
+                    )
+                    .await?;
+                context.auth_secret = Some(new_secret);
+            }
+            let cursor = self.repo.sync_cursor(id, "default").map_err(internal)?;
+            adapter.sync(&context, cursor).await
+        })
+        .await
+        .map_err(|_| ProviderError::Timeout)
+        .and_then(|value| value);
+
         match outcome {
             Ok(batch) => {
                 let write_started = std::time::Instant::now();
@@ -479,9 +500,69 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use llm_meter_core::{AuthScheme, BeginAuthRequest};
     use llm_meter_provider_testkit::MockProvider;
     use llm_meter_secret_store::MemorySecretStore;
+
+    struct RefreshFailureProvider;
+
+    #[async_trait]
+    impl ProviderAdapter for RefreshFailureProvider {
+        fn manifest(&self) -> llm_meter_core::ProviderManifest {
+            MockProvider.manifest()
+        }
+
+        fn supported_auth_schemes(&self) -> Vec<AuthScheme> {
+            MockProvider.supported_auth_schemes()
+        }
+
+        async fn begin_auth(
+            &self,
+            request: BeginAuthRequest,
+        ) -> Result<llm_meter_core::AuthChallenge, ProviderError> {
+            MockProvider.begin_auth(request).await
+        }
+
+        async fn complete_auth(
+            &self,
+            request: llm_meter_core::CompleteAuthRequest,
+            secrets: &dyn SecretStore,
+        ) -> Result<llm_meter_core::ConnectionIdentity, ProviderError> {
+            MockProvider.complete_auth(request, secrets).await
+        }
+
+        async fn probe_capabilities(
+            &self,
+            connection: &ConnectionContext,
+        ) -> Result<llm_meter_core::CapabilitySnapshot, ProviderError> {
+            MockProvider.probe_capabilities(connection).await
+        }
+
+        async fn sync(
+            &self,
+            connection: &ConnectionContext,
+            cursor: Option<llm_meter_core::SyncCursor>,
+        ) -> Result<llm_meter_core::SyncBatch, ProviderError> {
+            MockProvider.sync(connection, cursor).await
+        }
+
+        async fn disconnect(
+            &self,
+            connection: &ConnectionContext,
+            secrets: &dyn SecretStore,
+        ) -> Result<(), ProviderError> {
+            MockProvider.disconnect(connection, secrets).await
+        }
+
+        async fn refresh_credentials(
+            &self,
+            _connection: &ConnectionContext,
+            _secrets: &dyn SecretStore,
+        ) -> Result<Option<secrecy::SecretString>, ProviderError> {
+            Err(ProviderError::AuthenticationRequired)
+        }
+    }
     #[test]
     fn bounded_error_mapping() {
         let (status, retry) = error_status(&ProviderError::RateLimited { retry_at: None }, 0);
@@ -518,5 +599,45 @@ mod tests {
         let connection = runtime.complete_auth(&id, None).await.unwrap();
         assert_eq!(connection.provider_id, "mock");
         assert_eq!(repo.list_connections().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn credential_refresh_failure_records_error_state() {
+        let repo = Arc::new(Repository::in_memory().unwrap());
+        let mut runtime =
+            ProviderRuntime::new(repo.clone(), Arc::new(MemorySecretStore::default()));
+        runtime.register("mock", "fixture", Arc::new(MockProvider));
+        let challenge = runtime
+            .begin_auth(
+                BeginAuthRequest {
+                    connection_type: "fixture".into(),
+                    auth_scheme: AuthScheme::Manual,
+                    display_name: "Test Mock".into(),
+                },
+                "mock",
+            )
+            .await
+            .unwrap();
+        assert!(matches!(challenge, llm_meter_core::AuthChallenge::Complete));
+        let challenge_id = runtime
+            .pending_auth
+            .lock()
+            .await
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        let connection = runtime.complete_auth(&challenge_id, None).await.unwrap();
+        runtime.register("mock", "fixture", Arc::new(RefreshFailureProvider));
+
+        let error = runtime.sync_inner(connection.id, true).await.unwrap_err();
+
+        assert!(matches!(error, ProviderError::AuthenticationRequired));
+        let stored = repo.connection(connection.id).unwrap().unwrap();
+        assert_eq!(stored.status, ConnectionStatus::AuthRequired);
+        assert_eq!(
+            stored.last_error_code.as_deref(),
+            Some("authentication_required")
+        );
     }
 }

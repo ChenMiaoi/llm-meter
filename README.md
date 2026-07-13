@@ -9,14 +9,16 @@ LLM Meter is a local-first usage, cost, and quota monitor for LLM services on
 Linux. It combines a Rust daemon, CLI, native Noctalia/Waybar integration, and
 an optional Tauri desktop application.
 
-The current provider implementation supports OpenAI Platform accounts and
-ChatGPT subscriptions. LLM Meter can also discover locally running Codex
-sessions, split their token usage by model, and calculate an API-equivalent
-cost estimate.
+The current provider implementation supports OpenAI Platform accounts,
+ChatGPT subscriptions, and Kimi (Moonshot AI) Code subscriptions. LLM Meter
+can also discover locally running Codex sessions, split their token usage by
+model, and calculate an API-equivalent cost estimate.
 
 ## Features
 
 - ChatGPT subscription quota, weekly reset time, and reset-credit expiry.
+- Kimi (Moonshot AI) Code subscription quota and usage through OAuth device-code login.
+- Embedded pricing catalog for OpenAI, Kimi, MiniMax, GLM, MiMo, Claude, DeepSeek, and Gemini.
 - Estimated quota exhaustion time based on recent local activity.
 - OpenAI Platform usage and cost collection through supported API credentials.
 - Automatic discovery of running Codex sessions every two seconds.
@@ -32,9 +34,10 @@ cost estimate.
 
 > [!IMPORTANT]
 > ChatGPT subscriptions are not billed per Token. Local Codex costs shown by
-> LLM Meter are estimates using equivalent OpenAI API text-token prices, not an
-> additional charge or an invoice. Prices can change; the embedded table records
-> its source and effective date.
+> LLM Meter are estimates using equivalent API text-token prices, not an
+> additional charge or an invoice. The embedded catalog now covers OpenAI,
+> Kimi, MiniMax, GLM, MiMo, Claude, DeepSeek, and Gemini; prices can change
+> and each provider records its source and effective date.
 
 ## Architecture
 
@@ -181,19 +184,30 @@ make test
 
 ## Accounts and authentication
 
-The native popup provides browser-based ChatGPT login and connection
-management. Equivalent CLI commands are available:
+The native popup lets you choose a provider before logging in. It supports
+browser-based ChatGPT (OpenAI) and Kimi (Moonshot AI) logins and manages the
+resulting connections. Equivalent CLI commands are available:
 
 ```bash
-llm-meter add subscription --open
-llm-meter add subscription --device
+# OpenAI ChatGPT (browser login, default)
+llm-meter add subscription --provider openai --open --name "OpenAI ChatGPT"
+llm-meter add subscription --provider openai --device
+
+# Kimi (Moonshot AI) device-code login
+llm-meter add subscription --provider kimi --open --name Kimi
+
+# OpenAI API keys
 llm-meter add admin
 llm-meter add standard
 ```
 
-- `subscription` uses the local Codex/OpenAI account flow.
+- `subscription` supports both OpenAI and Kimi account flows; use `--provider`
+  to select one and `--open` to open the browser for OAuth/device-code steps.
 - `admin` requests an OpenAI Admin API key.
 - `standard` requests a standard OpenAI API key.
+- For automation, pipe one API key line to `llm-meter add admin --secret-stdin`
+  or `llm-meter add standard --secret-stdin`; API keys are never accepted in
+  command-line arguments.
 
 API keys and OAuth secrets go to the system Keyring. The SQLite database stores
 only credential references and non-secret account state. The ChatGPT
@@ -216,8 +230,9 @@ llm-meter waybar --watch
 
 `refresh-all` waits for every configured provider connection to finish a real
 network refresh and immediately refreshes the local Codex collector. Automatic
-provider refresh defaults to five minutes for ChatGPT subscriptions and ten
-minutes for Platform usage. Local Codex discovery runs every two seconds.
+provider refresh defaults to five minutes for ChatGPT and Kimi subscriptions
+and ten minutes for Platform usage. Local Codex discovery runs every two
+seconds.
 
 ## Noctalia and top-bar settings
 

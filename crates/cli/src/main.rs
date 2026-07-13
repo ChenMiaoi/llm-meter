@@ -5,7 +5,10 @@ use llm_meter_daemon::{
 };
 use llm_meter_secret_store::NativeSecretStore;
 use serde_json::{Value, json};
-use std::{io::Write, time::Duration};
+use std::{
+    io::{BufRead, Write},
+    time::Duration,
+};
 
 mod setup;
 mod update;
@@ -66,8 +69,14 @@ enum Command {
         /// Open the provider login page in the default browser.
         #[arg(long)]
         open: bool,
+        /// Provider to add a connection for.
+        #[arg(long, value_enum, default_value_t = Provider::Openai)]
+        provider: Provider,
         #[arg(long, default_value = "OpenAI")]
         name: String,
+        /// Read the secret credential from one line on standard input.
+        #[arg(long)]
+        secret_stdin: bool,
     },
     Budget {
         connection_id: String,
@@ -88,6 +97,13 @@ enum Command {
         main: bool,
     },
 }
+#[derive(Clone, Copy, clap::ValueEnum, Default)]
+enum Provider {
+    #[default]
+    Openai,
+    Kimi,
+}
+
 #[derive(Clone, clap::ValueEnum)]
 enum AddKind {
     Subscription,
@@ -231,15 +247,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             kind,
             device,
             open,
+            provider,
             name,
+            secret_stdin,
         } => match kind {
             AddKind::Subscription => {
-                let auth = if device {
-                    "oauth_device_code"
-                } else {
-                    "oauth_browser"
+                let (provider_id, connection_type, auth) = match provider {
+                    Provider::Kimi => ("kimi", "kimi_code_subscription", "oauth_device_code"),
+                    Provider::Openai => {
+                        if device {
+                            ("openai", "chatgpt_subscription", "oauth_device_code")
+                        } else {
+                            ("openai", "chatgpt_subscription", "oauth_browser")
+                        }
+                    }
                 };
-                let challenge = call(&p,"connections/add",json!({"provider_id":"openai","connection_type":"chatgpt_subscription","display_name":name,"auth_scheme":auth})).await?;
+                let challenge = call(
+                    &p,
+                    "connections/add",
+                    json!({"provider_id": provider_id, "connection_type": connection_type, "display_name": name, "auth_scheme": auth}),
+                )
+                .await?;
                 let challenge_id = challenge
                     .get("state")
                     .and_then(Value::as_str)
@@ -277,7 +305,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .get("challenge_id")
                     .and_then(Value::as_str)
                     .ok_or("daemon did not return challenge id")?;
-                let secret = rpassword::prompt_password("OpenAI Admin API Key: ")?;
+                let secret = read_secret(secret_stdin, "OpenAI Admin API Key: ")?;
                 let result = call(
                     &p,
                     "connections/auth/complete",
@@ -293,7 +321,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .get("challenge_id")
                     .and_then(Value::as_str)
                     .ok_or("daemon did not return challenge id")?;
-                let secret = rpassword::prompt_password("OpenAI API Key: ")?;
+                let secret = read_secret(secret_stdin, "OpenAI API Key: ")?;
                 let result = call(
                     &p,
                     "connections/auth/complete",
@@ -363,6 +391,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+fn read_secret(from_stdin: bool, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+    if !from_stdin {
+        return Ok(rpassword::prompt_password(prompt)?);
+    }
+    read_secret_line(std::io::stdin().lock())
+}
+
+fn read_secret_line(mut reader: impl BufRead) -> Result<String, Box<dyn std::error::Error>> {
+    let mut secret = String::new();
+    reader.read_line(&mut secret)?;
+    while matches!(secret.chars().last(), Some('\n' | '\r')) {
+        secret.pop();
+    }
+    if secret.is_empty() {
+        return Err("standard input did not contain a secret".into());
+    }
+    Ok(secret)
+}
+
 fn print(v: Value) {
     println!(
         "{}",
@@ -385,4 +432,20 @@ fn command_success(program: &str, args: &[&str]) -> bool {
         .args(args)
         .output()
         .is_ok_and(|v| v.status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_secret_line;
+
+    #[test]
+    fn reads_secret_from_one_line_without_line_ending() {
+        let secret = read_secret_line("api-secret\r\ntrailing".as_bytes()).unwrap();
+        assert_eq!(secret, "api-secret");
+    }
+
+    #[test]
+    fn rejects_empty_standard_input_secret() {
+        assert!(read_secret_line("\n".as_bytes()).is_err());
+    }
 }

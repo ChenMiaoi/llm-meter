@@ -2237,6 +2237,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "llm-meter-core",
+ "llm-meter-provider-kimi",
  "llm-meter-provider-openai",
  "llm-meter-secret-store",
  "llm-meter-storage",
@@ -2265,6 +2266,23 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "llm-meter-provider-kimi"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "llm-meter-core",
+ "reqwest 0.12.28",
+ "rust_decimal",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@ use crate::{
     scheduler::{ProviderRuntime, Scheduler},
     socket_path,
 };
+use llm_meter_provider_kimi::subscription::SubscriptionAdapter as KimiSubscriptionAdapter;
 use llm_meter_provider_openai::{
     platform::AdminAdapter, standard::StandardAdapter, subscription::SubscriptionAdapter,
 };
@@ -49,6 +50,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "openai",
         "chatgpt_subscription",
         Arc::new(SubscriptionAdapter::default()),
+    );
+    runtime.register(
+        "kimi",
+        "kimi_code_subscription",
+        Arc::new(KimiSubscriptionAdapter::default()),
     );
     runtime.register(
         "openai",

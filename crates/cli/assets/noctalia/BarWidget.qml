@@ -22,50 +22,56 @@ Item {
 
     function consume(line) {
         try {
-            const value = JSON.parse(String(line).trim())
-            root.latestValue = value
-            root.composeLabel()
-            root.details = value.tooltip || ""
+            const value = JSON.parse(String(line).trim());
+            root.latestValue = value;
+            root.composeLabel();
+            root.details = value.tooltip || "";
         } catch (error) {
-            root.label = "LLM error"
-            root.details = String(error)
+            root.label = "LLM error";
+            root.details = String(error);
         }
     }
 
     function compact(value) {
-        const number = Number(value || 0)
-        if (Math.abs(number) >= 1000000000) return (number / 1000000000).toFixed(2) + "B"
-        if (Math.abs(number) >= 1000000) return (number / 1000000).toFixed(2) + "M"
-        if (Math.abs(number) >= 1000) return (number / 1000).toFixed(1) + "K"
-        return Math.round(number).toLocaleString()
+        const number = Number(value || 0);
+        if (Math.abs(number) >= 1000000000)
+            return (number / 1000000000).toFixed(2) + "B";
+        if (Math.abs(number) >= 1000000)
+            return (number / 1000000).toFixed(2) + "M";
+        if (Math.abs(number) >= 1000)
+            return (number / 1000).toFixed(1) + "K";
+        return Math.round(number).toLocaleString();
     }
 
     function composeLabel() {
-        const value = root.latestValue
-        if (!value) return
-        const settings = pluginApi?.pluginSettings || ({})
-        const parts = []
+        const value = root.latestValue;
+        if (!value)
+            return;
+        const settings = pluginApi?.pluginSettings || ({});
+        const parts = [];
         if ((settings.barShowAccount ?? true) && value.account_label)
-            parts.push(value.account_label)
+            parts.push(value.account_label);
         if ((settings.barShowQuota ?? true) && value.percentage !== null && value.percentage !== undefined)
-            parts.push(value.percentage + "%")
+            parts.push(value.percentage + "%");
         if (settings.barShowTodayTokens ?? false)
-            parts.push(root.compact(value.today_tokens) + " tok")
+            parts.push(root.compact(value.today_tokens) + " tok");
         if ((settings.barShowTodayCost ?? false) && value.today_estimated_cost_usd !== null && value.today_estimated_cost_usd !== undefined) {
-            const cost = Number(value.today_estimated_cost_usd)
-            parts.push("$" + cost.toFixed(cost > 0 && cost < 1 ? 3 : 2))
+            const cost = Number(value.today_estimated_cost_usd);
+            parts.push("$" + cost.toFixed(cost > 0 && cost < 1 ? 3 : 2));
         }
         if (settings.barShowCodexSessions ?? false)
-            parts.push(value.active_codex_sessions + " Codex")
+            parts.push(value.active_codex_sessions + " Codex");
         if ((settings.barShowTrend ?? true) && value.trend)
-            parts.push(value.trend)
-        root.label = parts.length ? parts.join(" ") : "LLM Meter"
+            parts.push(value.trend);
+        root.label = parts.length ? parts.join(" ") : "LLM Meter";
     }
 
     onPluginApiChanged: root.composeLabel()
     Connections {
         target: pluginApi
-        function onPluginSettingsChanged() { root.composeLabel() }
+        function onPluginSettingsChanged() {
+            root.composeLabel();
+        }
     }
 
     BarPill {
@@ -77,19 +83,19 @@ Item {
         tooltipText: root.details
         forceOpen: true
         onClicked: {
-            TooltipService.hide()
-            pluginApi?.togglePanel(root.screen, pill)
+            TooltipService.hide();
+            pluginApi?.togglePanel(root.screen, pill);
         }
-        onRightClicked: Quickshell.execDetached([
-            Quickshell.env("HOME") + "/.local/bin/llm-meter-desktop", "--main"
-        ])
+        onRightClicked: Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/llm-meter-desktop", "--main"])
     }
 
     Process {
         id: watcher
         command: [Quickshell.env("HOME") + "/.local/bin/llm-meter", "waybar", "--watch"]
         running: true
-        stdout: SplitParser { onRead: line => root.consume(line) }
+        stdout: SplitParser {
+            onRead: line => root.consume(line)
+        }
     }
 
     Timer {

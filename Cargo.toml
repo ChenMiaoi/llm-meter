@@ -5,6 +5,7 @@ members = [
   "crates/storage",
   "crates/secret-store",
   "crates/provider-openai",
+  "crates/provider-kimi",
   "crates/provider-testkit",
   "crates/daemon",
   "crates/cli",

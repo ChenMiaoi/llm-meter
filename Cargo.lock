@@ -1294,8 +1294,10 @@ dependencies = [
 name = "llm-meter-daemon"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "llm-meter-core",
+ "llm-meter-provider-kimi",
  "llm-meter-provider-openai",
  "llm-meter-provider-testkit",
  "llm-meter-secret-store",
@@ -1310,6 +1312,23 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "llm-meter-provider-kimi"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "llm-meter-core",
+ "reqwest",
+ "rust_decimal",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
  "uuid",
 ]
 

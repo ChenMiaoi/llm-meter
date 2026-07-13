@@ -541,6 +541,18 @@ pub trait ProviderAdapter: Send + Sync {
         connection: &ConnectionContext,
         secrets: &dyn SecretStore,
     ) -> Result<(), ProviderError>;
+
+    /// Optional hook called before each sync to refresh expired credentials.
+    /// Returns a new secret string when the provider refreshed the credential;
+    /// the runtime updates the secret store and the connection context before
+    /// invoking `sync`.
+    async fn refresh_credentials(
+        &self,
+        _connection: &ConnectionContext,
+        _secrets: &dyn SecretStore,
+    ) -> Result<Option<SecretString>, ProviderError> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -601,6 +613,8 @@ impl fmt::Display for MetricKey {
         f.write_str(&self.0)
     }
 }
+
+pub mod pricing;
 
 #[cfg(test)]
 mod tests {
