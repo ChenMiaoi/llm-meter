@@ -1679,9 +1679,9 @@ Item {
                                 }
                             }
                         }
-                            TapHandler {
-                                onTapped: root.selectConnection(modelData)
-                            }
+                        TapHandler {
+                            onTapped: root.selectConnection(modelData)
+                        }
                     }
                 }
 

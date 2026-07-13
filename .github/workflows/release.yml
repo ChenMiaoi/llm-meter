@@ -21,29 +21,35 @@ concurrency:
 jobs:
   release:
     name: Build and publish GitHub Release
-    # Build release binaries on the older supported runner for wider glibc
-    # compatibility than the regular CI environment.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git \
+            github-cli \
+            jq \
+            libappindicator \
+            librsvg \
+            patchelf \
+            rustup \
+            webkit2gtk-4.1
+
       - name: Check out tagged source
         uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
 
+      - name: Trust checked-out repository
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
 
       - name: Validate tag and package versions
         shell: bash
@@ -142,7 +148,7 @@ jobs:
             ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,4 +160,8 @@ jobs:
           if [[ "$RELEASE_TAG" == *-* ]]; then
             flags+=(--prerelease)
           fi
-          gh release create "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM" "${flags[@]}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM" "${flags[@]}"
+          fi

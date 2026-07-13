@@ -227,7 +227,7 @@ impl RelayAdapter {
         let logs: Vec<NewApiLog> = decode_list(logs_value)?;
         let events = logs
             .into_iter()
-            .filter(|log| log.log_type.map_or(true, |kind| kind == 2 || kind == 0))
+            .filter(|log| log.log_type.is_none_or(|kind| kind == 2 || kind == 0))
             .map(|log| new_api_event(context.connection.id, log, observed))
             .collect::<Result<Vec<_>, _>>()?;
         let used = decimal_value(&usage.total_used);

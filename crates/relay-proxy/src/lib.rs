@@ -261,10 +261,9 @@ fn parse_sse(body: &[u8]) -> Option<Value> {
         .filter_map(|line| line.strip_prefix("data:").map(str::trim))
         .filter(|data| *data != "[DONE]")
         .filter_map(|data| serde_json::from_str(data).ok())
-        .filter(|value: &Value| {
+        .rfind(|value: &Value| {
             value.get("usage").is_some() || value.pointer("/response/usage").is_some()
         })
-        .last()
 }
 fn usage_event(connection_id: Uuid, value: &Value, client_name: &str) -> Option<UsageEvent> {
     let root = value.get("response").unwrap_or(value);

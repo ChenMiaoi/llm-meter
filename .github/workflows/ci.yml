@@ -17,7 +17,19 @@ jobs:
   rust:
     name: Rust workspace
     runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    env:
+      PATH: /usr/lib/qt6/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
     steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            dbus \
+            git \
+            pkgconf \
+            qt6-declarative \
+            rustup
+
       - name: Check out repository
         uses: actions/checkout@v7
 
@@ -26,15 +38,28 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libdbus-1-dev \
-            pkg-config
-
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Check QML formatting and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          qml_files=(
+            crates/cli/assets/noctalia/Main.qml
+            crates/cli/assets/noctalia/BarWidget.qml
+            crates/cli/assets/noctalia/Panel.qml
+          )
+          for file in "${qml_files[@]}"; do
+            diff -u "$file" <(qmlformat "$file")
+          done
+          qmllint \
+            --import info \
+            --unqualified info \
+            --required info \
+            --signal-handler-parameters info \
+            --unresolved-type info \
+            "${qml_files[@]}"
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -51,6 +76,9 @@ jobs:
             llm-meter-storage
             llm-meter-secret-store
             llm-meter-provider-openai
+            llm-meter-provider-kimi
+            llm-meter-relay-proxy
+            llm-meter-provider-relay
             llm-meter-provider-testkit
             llm-meter-daemon
             llm-meter-cli
@@ -74,21 +102,23 @@ jobs:
   desktop:
     name: Tauri desktop
     runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     steps:
+      - name: Install system dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git \
+            libappindicator \
+            librsvg \
+            patchelf \
+            rustup \
+            webkit2gtk-4.1
+
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
 
       - name: Check desktop application
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml

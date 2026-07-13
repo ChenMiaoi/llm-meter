@@ -243,7 +243,11 @@ async fn dispatch(
         "proxy/status" => match (runtime.as_ref(), param_id(&r.params)) {
             (Some(runtime), Ok(id)) => runtime
                 .proxy_running(id)
-                .and_then(|running| runtime.proxy_listen(id).map(|listen| json!({"running":running,"listen":listen})))
+                .and_then(|running| {
+                    runtime
+                        .proxy_listen(id)
+                        .map(|listen| json!({"running":running,"listen":listen}))
+                })
                 .map_err(|error| (-32010, error.code())),
             (None, _) => Err((-32001, "provider runtime unavailable")),
             (_, Err(error)) => Err(error),
