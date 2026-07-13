@@ -1,0 +1,12 @@
+# Copy to ~/.llm-meter/config.toml. Set LLM_METER_HOME to override the
+# ~/.llm-meter root. This file must contain no credentials.
+scheduler_tick_seconds = 30
+subscription_sync_seconds = 300
+platform_usage_sync_seconds = 600
+manual_refresh_min_seconds = 30
+stale_after_seconds = 1800
+
+[retention]
+raw_days = 30
+hourly_days = 180
+provider_events_days = 30

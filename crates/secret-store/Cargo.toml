@@ -1,0 +1,20 @@
+[package]
+name = "llm-meter-secret-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Native Keyring-backed credential storage for LLM Meter"
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+keyring.workspace = true
+llm-meter-core = { version = "0.1.0", path = "../core" }
+secrecy.workspace = true
+tokio.workspace = true
+uuid.workspace = true

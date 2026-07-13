@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/core",
+  "crates/storage",
+  "crates/secret-store",
+  "crates/provider-openai",
+  "crates/provider-testkit",
+  "crates/daemon",
+  "crates/cli",
+]
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/llm-meter/llm-meter"
+readme = "README.md"
+rust-version = "1.85"
+keywords = ["llm", "openai", "usage", "wayland", "monitoring"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+async-trait = "0.1"
+bitflags = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+hex = "0.4"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+notify-rust = "4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rpassword = "7"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }

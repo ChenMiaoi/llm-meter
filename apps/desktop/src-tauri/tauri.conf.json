@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LLM Meter",
+  "version": "0.1.0",
+  "identifier": "io.github.llmmeter",
+  "build": { "frontendDist": "../src" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": { "csp": "default-src 'self'; style-src 'self'; script-src 'self'" }
+  },
+  "bundle": { "active": true, "targets": "all" }
+}

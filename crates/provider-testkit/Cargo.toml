@@ -1,0 +1,21 @@
+[package]
+name = "llm-meter-provider-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Mock providers and adapter test helpers for LLM Meter"
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-secret-store = { version = "0.1.0", path = "../secret-store" }
+secrecy.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true

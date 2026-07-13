@@ -1,0 +1,24 @@
+[package]
+name = "llm-meter-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Provider-neutral domain types and adapter contracts for LLM Meter"
+
+[dependencies]
+async-trait.workspace = true
+bitflags.workspace = true
+chrono.workspace = true
+hex.workspace = true
+rust_decimal.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

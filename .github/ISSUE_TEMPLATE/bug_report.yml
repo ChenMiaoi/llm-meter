@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible problem in the daemon, CLI, desktop app, or top-bar integration.
+title: "[Bug]: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve LLM Meter. Remove account identifiers, API keys, OAuth data, and other secrets before attaching output.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Daemon / local Codex collector
+        - Noctalia plugin
+        - CLI
+        - Tauri desktop app
+        - Installer / setup wizard
+        - Packaging / systemd
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+      placeholder: Describe the actual and expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: LLM Meter version or commit
+      placeholder: 0.1.0 or git commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: Installation method
+      placeholder: cargo install, make install, distribution package, source build
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, desktop environment, top bar, and relevant versions.
+      placeholder: CachyOS; Hyprland 0.x; Noctalia 4.x; Wayland
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics and logs
+      description: Include `llm-meter diagnostics`, daemon logs, or screenshots when useful. Remove secrets and personal data first.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials, tokens, account identifiers, and other sensitive data.
+          required: true

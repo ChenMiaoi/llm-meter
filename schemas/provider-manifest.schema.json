@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://io.github.llmmeter/schemas/provider-manifest-v1.json",
+  "title": "LLM Meter Provider Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider_id", "display_name", "adapter_version", "connection_types"],
+  "properties": {
+    "provider_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "adapter_version": { "type": "string", "minLength": 1 },
+    "connection_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "display_name", "auth_schemes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "display_name": { "type": "string", "minLength": 1 },
+          "auth_schemes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["oauth_browser", "oauth_device_code", "api_key", "admin_api_key", "service_account", "personal_access_token", "local_session_bridge", "local_proxy", "manual"] }
+          }
+        }
+      }
+    }
+  }
+}

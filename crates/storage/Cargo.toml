@@ -1,0 +1,21 @@
+[package]
+name = "llm-meter-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "SQLite storage, migrations, and retention for LLM Meter"
+
+[dependencies]
+chrono.workspace = true
+llm-meter-core = { version = "0.1.0", path = "../core" }
+rusqlite.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

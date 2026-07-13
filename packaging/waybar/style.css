@@ -1,0 +1,11 @@
+@import "llm-meter.css";
+
+* {
+  font-family: sans-serif;
+  font-size: 12px;
+}
+
+window#waybar {
+  background: rgba(9, 9, 29, 0.92);
+  color: #f4f2ff;
+}

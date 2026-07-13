@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Local LLM Meter desktop windows","local":true,"windows":["popup","main"],"permissions":["core:default"]}}

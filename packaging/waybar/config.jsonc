@@ -1,0 +1,20 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 32,
+  "spacing": 8,
+  "modules-left": [],
+  "modules-center": [],
+  "modules-right": ["custom/llm-meter"],
+  "custom/llm-meter": {
+    "exec": "$HOME/.local/bin/llm-meter waybar --watch",
+    "return-type": "json",
+    "format": "{text}",
+    "tooltip": true,
+    "escape": true,
+    "exec-on-event": false,
+    "on-click": "$HOME/.local/bin/llm-meter-desktop --toggle",
+    "on-click-right": "$HOME/.local/bin/llm-meter-desktop --main",
+    "restart-interval": 5
+  }
+}

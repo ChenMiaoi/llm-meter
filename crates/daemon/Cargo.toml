@@ -1,0 +1,31 @@
+[package]
+name = "llm-meter-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Local-first provider scheduler, Codex collector, and IPC runtime for LLM Meter"
+[dependencies]
+chrono.workspace = true
+llm-meter-core = { version = "0.1.0", path = "../core" }
+llm-meter-provider-openai = { version = "0.1.0", path = "../provider-openai" }
+llm-meter-secret-store = { version = "0.1.0", path = "../secret-store" }
+llm-meter-storage = { version = "0.1.0", path = "../storage" }
+notify-rust.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rust_decimal.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+llm-meter-provider-testkit = { version = "0.1.0", path = "../provider-testkit" }

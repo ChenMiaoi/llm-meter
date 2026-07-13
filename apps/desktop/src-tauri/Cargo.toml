@@ -1,0 +1,17 @@
+[package]
+name = "llm-meter-desktop"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+llm-meter-daemon = { path = "../../../crates/daemon" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["rt", "macros"] }
+url = "2"

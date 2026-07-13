@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish GitHub Release
+    # Build release binaries on the older supported runner for wider glibc
+    # compatibility than the regular CI environment.
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Validate tag and package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "error: release tag must be a semantic version such as v0.1.0" >&2
+            exit 1
+          fi
+
+          version="${RELEASE_TAG#v}"
+          mapfile -t workspace_versions < <(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[].version' |
+              sort -u
+          )
+          if [[ "${#workspace_versions[@]}" -ne 1 || "${workspace_versions[0]}" != "$version" ]]; then
+            printf 'error: workspace versions (%s) do not match tag %s\n' \
+              "${workspace_versions[*]}" "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          desktop_version="$(
+            cargo metadata \
+              --no-deps \
+              --format-version 1 \
+              --manifest-path apps/desktop/src-tauri/Cargo.toml |
+              jq -r '.packages[] | select(.name == "llm-meter-desktop") | .version'
+          )"
+          if [[ "$desktop_version" != "$version" ]]; then
+            echo "error: desktop version $desktop_version does not match tag $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Test release source
+        run: cargo test --workspace --locked
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --workspace --release --locked
+          cargo build \
+            --release \
+            --locked \
+            --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Assemble reproducible archive and checksums
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(rustc -vV | sed -n 's/^host: //p')"
+          release_name="llm-meter-${RELEASE_TAG}-${target}"
+          stage="dist/${release_name}"
+
+          install -d \
+            "$stage/bin" \
+            "$stage/share/llm-meter"
+          install -m 0755 target/release/llm-meter "$stage/bin/llm-meter"
+          install -m 0755 target/release/llm-meterd "$stage/bin/llm-meterd"
+          install -m 0755 \
+            apps/desktop/src-tauri/target/release/llm-meter-desktop \
+            "$stage/bin/llm-meter-desktop"
+          install -m 0644 README.md LICENSE config.example.toml "$stage/"
+          cp -R packaging/. "$stage/share/llm-meter/"
+
+          source_date_epoch="$(git log -1 --format=%ct "$RELEASE_TAG")"
+          archive="${release_name}.tar.gz"
+          tar \
+            --sort=name \
+            --mtime="@${source_date_epoch}" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C dist \
+            -cf - \
+            "$release_name" | gzip -n > "dist/$archive"
+          (
+            cd dist
+            sha256sum "$archive" > SHA256SUMS
+          )
+
+          {
+            echo "archive=dist/$archive"
+            echo "checksum=dist/SHA256SUMS"
+            echo "release_name=$release_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.release_name }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          flags=(--verify-tag --generate-notes --title "LLM Meter $RELEASE_TAG")
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "$ARCHIVE" "$CHECKSUM" "${flags[@]}"

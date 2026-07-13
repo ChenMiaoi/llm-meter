@@ -1,0 +1,14 @@
+[Unit]
+Description=LLM Meter daemon
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/llm-meterd
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=llm-meter
+RuntimeDirectoryMode=0700
+UMask=0077
+
+[Install]
+WantedBy=default.target

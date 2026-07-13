@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Verify publishable package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages=(
+            llm-meter-core
+            llm-meter-storage
+            llm-meter-secret-store
+            llm-meter-provider-openai
+            llm-meter-provider-testkit
+            llm-meter-daemon
+            llm-meter-cli
+          )
+          for package in "${packages[@]}"; do
+            cargo package --locked --allow-dirty --list -p "$package" >/dev/null
+          done
+          cargo package --locked --allow-dirty -p llm-meter-core
+
+      - name: Check distributable integration assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in manifest.json Main.qml BarWidget.qml Panel.qml; do
+            cmp "crates/cli/assets/noctalia/$file" "packaging/noctalia/llm-meter/$file"
+          done
+          for file in llm-meter.lua llm-meter.conf; do
+            cmp "crates/cli/assets/hyprland/$file" "packaging/hyprland/$file"
+          done
+
+  desktop:
+    name: Tauri desktop
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Check desktop application
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml

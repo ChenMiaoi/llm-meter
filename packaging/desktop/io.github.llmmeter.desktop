@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LLM Meter
+Comment=Local LLM usage and quota monitor
+Exec=llm-meter-desktop --main
+Icon=io.github.llmmeter
+Terminal=false
+Categories=Utility;Monitor;
+StartupWMClass=io.github.llmmeter

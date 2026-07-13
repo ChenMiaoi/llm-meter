@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Local LLM Meter desktop windows",
+  "windows": ["popup", "main"],
+  "permissions": ["core:default"]
+}

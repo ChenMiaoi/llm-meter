@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LLM Meter</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+  <div class="shell" id="shell" tabindex="-1">
+    <header class="header">
+      <div class="brand"><span class="logo" aria-hidden="true">◩</span><div><h1>LLM Meter</h1><p id="scope">本地 Snapshot</p></div></div>
+      <div class="header-actions"><span id="sync-state" class="status">正在连接</span><button id="menu" class="icon" aria-label="窗口菜单">⋯</button><button id="close" class="icon" aria-label="关闭窗口">×</button></div>
+    </header>
+    <nav id="nav" aria-label="主导航"><button data-page="overview" class="active">概览</button><button data-page="usage">使用量</button><button data-page="costs" id="cost-nav">费用</button><button data-page="connections">连接</button><button data-page="settings">设置</button></nav>
+    <main id="content" aria-live="polite"><section class="card empty"><h2>正在读取 daemon</h2><p>历史数据仍由后台服务管理。</p></section></main>
+    <footer><span id="last-sync">尚未同步</span><div><button id="local-refresh">刷新视图</button><button id="provider-refresh">同步 Provider</button><button id="pin">打开主窗口</button></div></footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

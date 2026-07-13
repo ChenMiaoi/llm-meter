@@ -1,0 +1,13 @@
+{
+  "custom/llm-meter": {
+    "exec": "llm-meter waybar --watch",
+    "return-type": "json",
+    "format": "{text}",
+    "tooltip": true,
+    "escape": true,
+    "exec-on-event": false,
+    "on-click": "llm-meter ui --toggle",
+    "on-click-right": "llm-meter ui --main",
+    "restart-interval": 5
+  }
+}

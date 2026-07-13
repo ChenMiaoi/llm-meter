@@ -1,0 +1,8 @@
+#custom-llm-meter { padding: 0 8px; }
+#custom-llm-meter.quota-warning { color: #f9e2af; }
+#custom-llm-meter.quota-critical,
+#custom-llm-meter.quota-exhausted,
+#custom-llm-meter.auth-required,
+#custom-llm-meter.provider-error,
+#custom-llm-meter.daemon-offline { color: #f38ba8; }
+#custom-llm-meter.sync-stale { opacity: 0.72; }
